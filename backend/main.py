@@ -8,7 +8,8 @@ from cache import get_traffic_data, get_bus_data
 from database import init_db
 from ws_manager import manager
 from districts import district_stats_from_features
-from services.history import get_traffic_history, get_district_stats_db
+from services.history import get_traffic_history, get_district_stats_db, get_weekly_heatmap
+from services.metro import get_metro_routes, get_metro_stations
 import os
 
 load_dotenv()
@@ -74,6 +75,26 @@ async def traffic_districts():
     # Fallback: anlık trafik verisinden hesapla
     data = get_traffic_data()
     return district_stats_from_features(data.get("features", []))
+
+
+# ── Faz 3 endpoint'leri ─────────────────────────────────────────────────────
+
+@app.get("/api/v1/metro/routes")
+async def metro_routes():
+    """M1, M2, M3, Ankaray hat güzergahları (GeoJSON)."""
+    return get_metro_routes()
+
+
+@app.get("/api/v1/metro/stations")
+async def metro_stations():
+    """Metro ve Ankaray istasyon noktaları (GeoJSON)."""
+    return get_metro_stations()
+
+
+@app.get("/api/v1/traffic/weekly")
+async def traffic_weekly():
+    """Son 7 günün saatlik ortalama yoğunluğu — haftalık ısı haritası."""
+    return await get_weekly_heatmap()
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

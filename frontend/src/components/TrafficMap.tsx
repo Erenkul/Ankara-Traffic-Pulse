@@ -1,17 +1,20 @@
 import { useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { DeckGL } from '@deck.gl/react';
-import { ScatterplotLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PathLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { ANKARA_CENTER, CARTO_STYLE } from '../constants';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useHistoricalData } from '../hooks/useHistoricalData';
+import { useMetroData } from '../hooks/useMetroData';
+import { useWeeklyHeatmap } from '../hooks/useWeeklyHeatmap';
 import { TimeSlider } from './TimeSlider';
 import DistrictSidebar from './DistrictSidebar';
 import type { TrafficPoint, BusPoint } from '../hooks/useTrafficData';
+import type { MetroRoute } from '../hooks/useMetroData';
 
-type ViewMode = 'live' | 'history';
+type ViewMode  = 'live' | 'history' | 'weekly';
 type LayerMode = 'scatter' | 'heat';
 
 function getCongestionColor(ratio: number): [number, number, number, number] {
@@ -21,18 +24,26 @@ function getCongestionColor(ratio: number): [number, number, number, number] {
 }
 
 export default function TrafficMap() {
-  const [viewState, setViewState] = useState(ANKARA_CENTER);
-  const [viewMode, setViewMode]   = useState<ViewMode>('live');
-  const [layerMode, setLayerMode] = useState<LayerMode>('scatter');
+  const [viewState, setViewState]     = useState(ANKARA_CENTER);
+  const [viewMode, setViewMode]       = useState<ViewMode>('live');
+  const [layerMode, setLayerMode]     = useState<LayerMode>('scatter');
   const [historyHour, setHistoryHour] = useState<number>(8);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showMetro, setShowMetro]     = useState(true);
 
   const { trafficData: liveTraffic, busData, lastUpdate, connected } = useWebSocket();
   const { data: historyTraffic, loading: histLoading } = useHistoricalData(
     viewMode === 'history' ? historyHour : null
   );
+  const { data: weeklyTraffic, loading: weeklyLoading } = useWeeklyHeatmap(viewMode === 'weekly');
+  const { routes: metroRoutes } = useMetroData();
 
-  const activeTraffic: TrafficPoint[] = viewMode === 'live' ? liveTraffic : historyTraffic;
+  const activeTraffic: TrafficPoint[] =
+    viewMode === 'live'    ? liveTraffic    :
+    viewMode === 'history' ? historyTraffic :
+    weeklyTraffic;
+
+  // ── Katmanlar ───────────────────────────────────────────────────────────────
 
   const scatterLayer = new ScatterplotLayer<TrafficPoint>({
     id: 'traffic-scatter',
@@ -53,7 +64,7 @@ export default function TrafficMap() {
     id: 'traffic-heat',
     data: activeTraffic,
     getPosition: d => d.position,
-    getWeight: d => 1 - d.congestionRatio,  // daha tıkanık = daha sıcak
+    getWeight: d => 1 - d.congestionRatio,
     radiusPixels: 80,
     intensity: 1.2,
     threshold: 0.05,
@@ -76,6 +87,18 @@ export default function TrafficMap() {
     getFillColor: [0, 194, 255, 230],
     radiusMinPixels: 6,
     pickable: true,
+    visible: viewMode === 'live',
+  });
+
+  const metroLayer = new PathLayer<MetroRoute>({
+    id: 'metro-layer',
+    data: metroRoutes,
+    getPath: d => d.geometry.coordinates,
+    getColor: d => [...d.properties.color, 220] as [number, number, number, number],
+    getWidth: 4,
+    widthMinPixels: 3,
+    pickable: true,
+    visible: showMetro,
   });
 
   return (
@@ -84,21 +107,24 @@ export default function TrafficMap() {
         viewState={viewState}
         onViewStateChange={({ viewState: vs }) => setViewState(vs as typeof ANKARA_CENTER)}
         controller={true}
-        layers={[heatLayer, scatterLayer, busLayer]}
+        layers={[heatLayer, scatterLayer, busLayer, metroLayer]}
         style={{ width: '100%', height: '100%' }}
         getTooltip={({ object }) => {
-          const o = object as TrafficPoint | BusPoint | null;
+          const o = object as TrafficPoint | BusPoint | MetroRoute | null;
           if (!o) return null;
           if ('congestionRatio' in o)
-            return `Yoğunluk: ${Math.round((1 - o.congestionRatio) * 100)}%`;
-          if ('hatNo' in o) return `Hat: ${o.hatNo}`;
+            return `Yoğunluk: ${Math.round((1 - (o as TrafficPoint).congestionRatio) * 100)}%`;
+          if ('hatNo' in o)
+            return `Hat: ${(o as BusPoint).hatNo}`;
+          if ('properties' in o && 'name' in (o as MetroRoute).properties)
+            return (o as MetroRoute).properties.name;
           return null;
         }}
       >
         <Map mapStyle={CARTO_STYLE} />
       </DeckGL>
 
-      {/* ── Sol Alt Bilgi Paneli ── */}
+      {/* ── Sol Alt Kontrol Paneli ── */}
       <div style={{
         position: 'absolute', bottom: 24, left: 24,
         background: 'rgba(13,17,23,0.90)',
@@ -109,43 +135,48 @@ export default function TrafficMap() {
       }}>
         <div style={{ color: '#00C2FF', fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>
           ANKARA TRAFFIC PULSE
-          <span style={{
-            marginLeft: 8, fontSize: 10, fontWeight: 400,
-            color: connected ? '#00D084' : '#FF4D4D',
-          }}>
+          <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 400, color: connected ? '#00D084' : '#FF4D4D' }}>
             {connected ? '● WS' : '● REST'}
           </span>
         </div>
 
-        {/* Katman seçici */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <button onClick={() => setLayerMode('scatter')} style={btnStyle(layerMode === 'scatter')}>
-            Nokta
-          </button>
-          <button onClick={() => setLayerMode('heat')} style={btnStyle(layerMode === 'heat')}>
-            Isı Haritası
-          </button>
+        {/* Katman */}
+        <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+          <button onClick={() => setLayerMode('scatter')} style={btn(layerMode === 'scatter')}>Nokta</button>
+          <button onClick={() => setLayerMode('heat')}    style={btn(layerMode === 'heat')}>Isı</button>
         </div>
 
-        {/* Mod seçici */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <button onClick={() => setViewMode('live')} style={btnStyle(viewMode === 'live')}>
-            Canlı
-          </button>
-          <button onClick={() => setViewMode('history')} style={btnStyle(viewMode === 'history')}>
-            Geçmiş
-          </button>
-          <button onClick={() => setShowSidebar(s => !s)} style={btnStyle(showSidebar)}>
-            Bölgeler
-          </button>
+        {/* Mod */}
+        <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+          <button onClick={() => setViewMode('live')}    style={btn(viewMode === 'live')}>Canlı</button>
+          <button onClick={() => setViewMode('history')} style={btn(viewMode === 'history')}>Geçmiş</button>
+          <button onClick={() => setViewMode('weekly')}  style={btn(viewMode === 'weekly')}>Haftalık {weeklyLoading ? '…' : ''}</button>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 4 }}>
+        {/* Metro + Bölge toggle */}
+        <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+          <button onClick={() => setShowMetro(s => !s)}  style={btn(showMetro)}>Metro</button>
+          <button onClick={() => setShowSidebar(s => !s)} style={btn(showSidebar)}>Bölgeler</button>
+        </div>
+
+        {/* Lejant */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 3, flexWrap: 'wrap' }}>
           <span style={{ color: '#00D084' }}>● Serbest</span>
           <span style={{ color: '#FFC300' }}>● Yavaş</span>
           <span style={{ color: '#FF4D4D' }}>● Tıkanık</span>
         </div>
-        <div style={{ color: '#00C2FF' }}>● EGO Otobüs</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ color: '#00C2FF' }}>● EGO Otobüs</span>
+          {showMetro && (
+            <>
+              <span style={{ color: '#DC3232' }}>— M1</span>
+              <span style={{ color: '#3264DC' }}>— M2</span>
+              <span style={{ color: '#1EB464' }}>— Ankaray</span>
+              <span style={{ color: '#B450DC' }}>— M3</span>
+            </>
+          )}
+        </div>
+
         {lastUpdate && (
           <div style={{ color: '#555', marginTop: 6, fontSize: 11 }}>
             Son güncelleme: {lastUpdate.toLocaleTimeString('tr-TR')}
@@ -153,7 +184,7 @@ export default function TrafficMap() {
         )}
       </div>
 
-      {/* ── Zaman Kaydırıcı (Geçmiş modda) ── */}
+      {/* ── TimeSlider (Geçmiş modda) ── */}
       {viewMode === 'history' && (
         <TimeSlider
           value={historyHour}
@@ -171,7 +202,7 @@ export default function TrafficMap() {
   );
 }
 
-function btnStyle(active: boolean): React.CSSProperties {
+function btn(active: boolean): React.CSSProperties {
   return {
     padding: '3px 10px',
     borderRadius: 5,

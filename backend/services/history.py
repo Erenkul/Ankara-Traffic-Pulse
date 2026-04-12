@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, extract, and_
 from sqlalchemy import func as sqlfunc
 import logging
+from cache import get_traffic_data
 
 import database
 from db_models import TrafficSnapshot
@@ -99,3 +100,45 @@ async def get_district_stats_db() -> list[dict]:
     except Exception as e:
         logger.error(f"Bölge istatistik hatası: {e}")
         return []
+
+
+async def get_weekly_heatmap() -> dict:
+    """Son 7 günün saatlik ortalama yoğunluğu — haftalık ısı haritası.
+
+    DB yoksa anlık cache verisinden fallback döner.
+    """
+    if not database.DB_AVAILABLE or database.AsyncSessionLocal is None:
+        # Fallback: anlık veriyi çoğalt (görsel demo için)
+        data = get_traffic_data()
+        return {"type": "FeatureCollection", "features": data.get("features", [])}
+
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        async with database.AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(
+                    TrafficSnapshot.lat,
+                    TrafficSnapshot.lng,
+                    sqlfunc.avg(TrafficSnapshot.congestion_ratio).label("avg_ratio"),
+                    sqlfunc.count(TrafficSnapshot.id).label("count"),
+                )
+                .where(TrafficSnapshot.recorded_at >= since)
+                .group_by(TrafficSnapshot.lat, TrafficSnapshot.lng)
+            )
+            rows = result.all()
+
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [r.lng, r.lat]},
+                "properties": {
+                    "congestionRatio": round(float(r.avg_ratio), 3),
+                    "sampleCount": r.count,
+                },
+            }
+            for r in rows
+        ]
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        logger.error(f"Haftalık ısı haritası hatası: {e}")
+        return {"type": "FeatureCollection", "features": []}
