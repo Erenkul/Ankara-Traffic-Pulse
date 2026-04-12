@@ -8,7 +8,9 @@ client = TestClient(app)
 def test_health():
     r = client.get("/api/v1/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    data = r.json()
+    assert data["status"] == "ok"
+    assert "db" in data  # True (PostgreSQL) veya False (in-memory)
 
 
 def test_traffic_live_returns_geojson():
