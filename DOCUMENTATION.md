@@ -2,7 +2,7 @@
 
 ## 1. Proje Genel Bakış
 
-Ankara Traffic Pulse, Ankara'nın anlık trafik akışını ve EGO belediye otobüslerinin gerçek zamanlı konumlarını estetik bir dijital ikiz üzerinde sunan web uygulamasıdır. Proje tamamen ücretsiz ve açık kaynak araçlarla inşa edilir — hiçbir API token'ı ücret gerektirmez (TomTom hariç, o da ücretsiz katman).
+Ankara Traffic Pulse, Ankara'nın anlık trafik akışını ve EGO belediye otobüslerinin gerçek zamanlı konumlarını estetik bir dijital ikiz üzerinde sunan web uygulamasıdır. Proje tamamen ücretsiz ve açık kaynak araçlarla inşa edilmiştir — hiçbir API token'ı ücret gerektirmez (TomTom hariç, o da ücretsiz katman).
 
 ---
 
@@ -10,16 +10,18 @@ Ankara Traffic Pulse, Ankara'nın anlık trafik akışını ve EGO belediye otob
 
 | Katman | Teknoloji |
 |---|---|
-| Frontend Framework | React 18 + Vite + TypeScript |
+| Frontend Framework | React 18 + Vite 6 + TypeScript |
 | Harita | MapLibre GL JS — ücretsiz, token yok |
-| Görselleştirme | deck.gl ScatterplotLayer |
-| Tile | CARTO Dark Matter — ücretsiz, token yok |
+| Görselleştirme | Deck.gl v9 — ScatterplotLayer + HeatmapLayer |
+| Stil | Tailwind CSS v4 |
 | Backend | Python FastAPI + uvicorn |
-| Zamanlayıcı | APScheduler — 60 sn trafik, 30 sn otobüs |
-| HTTP | httpx — async |
+| Zamanlayıcı | APScheduler — 60s trafik, 30s otobüs |
+| HTTP | httpx async |
+| Veritabanı | PostgreSQL + SQLAlchemy 2.0 async (opsiyonel) |
+| Gerçek Zamanlı | WebSocket push + REST polling fallback |
 | Trafik API | TomTom Traffic Flow API — 2.500 req/gün ücretsiz |
-| Otobüs API | EGO Cepte gayri resmi endpoint |
-| Veri Deposu | In-memory (Faz 1) |
+| Otobüs API | EGO Cepte gayri resmi endpoint (mock fallback) |
+| Harita Tile | CARTO Dark Matter — ücretsiz, token yok |
 
 ---
 
@@ -33,16 +35,20 @@ ankara-traffic-pulse/
 ├── docker-compose.yml
 ├── .gitignore
 ├── backend/
-│   ├── main.py
-│   ├── scheduler.py
-│   ├── cache.py
-│   ├── models.py
+│   ├── main.py              ← FastAPI, lifespan, tüm endpoint'ler + WS
+│   ├── scheduler.py         ← APScheduler + DB kayıt + WS broadcast
+│   ├── cache.py             ← In-memory anlık veri
+│   ├── database.py          ← SQLAlchemy async engine, DB_AVAILABLE flag
+│   ├── db_models.py         ← TrafficSnapshot ORM
+│   ├── districts.py         ← Bölge sınıflandırma (bounding box)
+│   ├── ws_manager.py        ← WebSocket ConnectionManager
+│   ├── models.py            ← Pydantic response modelleri
+│   ├── Procfile             ← Railway: web: uvicorn main:app ...
 │   ├── services/
-│   │   ├── __init__.py
-│   │   ├── tomtom.py
-│   │   └── ego.py
+│   │   ├── tomtom.py        ← TomTom API (4'erli grup rotasyonu)
+│   │   ├── ego.py           ← EGO otobüs (mock fallback)
+│   │   └── history.py       ← DB kayıt, geçmiş sorgu, bölge istatistik
 │   ├── tests/
-│   │   ├── __init__.py
 │   │   ├── test_tomtom.py
 │   │   ├── test_ego.py
 │   │   └── test_api.py
@@ -52,6 +58,7 @@ ankara-traffic-pulse/
     ├── index.html
     ├── vite.config.ts
     ├── tsconfig.json
+    ├── tsconfig.app.json
     ├── tsconfig.node.json
     ├── package.json
     ├── eslint.config.js
@@ -61,11 +68,14 @@ ankara-traffic-pulse/
         ├── index.css
         ├── constants.ts
         ├── hooks/
-        │   └── useTrafficData.ts
+        │   ├── useTrafficData.ts
+        │   ├── useWebSocket.ts
+        │   └── useHistoricalData.ts
         └── components/
             ├── TrafficMap.tsx
-            ├── BusLayer.tsx
-            └── TimeSlider.tsx
+            ├── DistrictSidebar.tsx
+            ├── TimeSlider.tsx
+            └── BusLayer.tsx
 ```
 
 ---
@@ -75,10 +85,9 @@ ankara-traffic-pulse/
 ### 4.1. TomTom Traffic Flow API
 
 **Hesap açma:**
-1. [developer.tomtom.com](https://developer.tomtom.com) adresine git
-2. "Get Started for Free" — kredi kartı gerekmez
-3. Dashboard → API Keys → varsayılan anahtarı kopyala
-4. `backend/.env` dosyasına `TOMTOM_API_KEY=...` olarak yaz
+1. [developer.tomtom.com](https://developer.tomtom.com) — kredi kartı gerekmez
+2. "Get Started for Free" → Dashboard → API Keys
+3. `backend/.env` → `TOMTOM_API_KEY=...`
 
 **Endpoint:**
 ```
@@ -86,19 +95,14 @@ GET https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json
     ?point={LAT},{LNG}&unit=KMPH&openLr=false&key={API_KEY}
 ```
 
-**Ankara koordinatları:**
+**Ankara koordinatları (8 nokta, 2 grup):**
 ```
-39.9334, 32.8597  → Kızılay
-39.9560, 32.8598  → Atatürk Bulvarı Kuzey
-39.9010, 32.8650  → Çankaya
-39.9490, 32.8580  → Ulus
-39.9750, 32.8150  → Yenimahalle
-39.8700, 32.7500  → Eskişehir Yolu
-40.0300, 32.9000  → Esenboğa Yolu
-39.8600, 32.8200  → Konya Yolu
+Grup A: Kızılay, Atatürk Blv. Kuzey, Çankaya, Ulus
+Grup B: Yenimahalle, Eskişehir Yolu, Esenboğa Yolu, Konya Yolu
 ```
+Her 60 saniyede bir grup sorgulanır → ~720 req/gün (limit: 2.500).
 
-**Yanıt alanları:**
+**Yanıt:**
 ```json
 {
   "flowSegmentData": {
@@ -110,43 +114,36 @@ GET https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json
 }
 ```
 
-**Yoğunluk hesabı:** `congestionRatio = currentSpeed / freeFlowSpeed`
+**Yoğunluk:** `congestionRatio = currentSpeed / freeFlowSpeed`
 
 | Değer | Renk | Anlam |
 |---|---|---|
-| ≥ 0.80 | Yeşil | Trafik serbest |
-| 0.50 – 0.79 | Sarı | Trafik yavaş |
-| < 0.50 | Kırmızı | Trafik tıkanık |
-
-**Kota yönetimi:** 8 nokta 4'erli 2 gruba bölünür. Her 60 sn bir grup sorgulanır. Günlük ~720 istek, limit 2.500.
+| ≥ 0.80 | Yeşil | Serbest |
+| 0.50–0.79 | Sarı | Yavaş |
+| < 0.50 | Kırmızı | Tıkanık |
 
 ---
 
 ### 4.2. EGO Cepte Otobüs API
 
-EGO'nun resmi API'sı yoktur. EGO Cepte uygulaması arka planda bir web servisine istek atar.
+EGO'nun resmi API'sı yoktur. Endpoint gayri resmidir.
 
 **Yöntem A — mitmproxy:**
 ```bash
 pip install mitmproxy
 mitmweb --listen-port 8080
 ```
-Android emülatör veya telefon proxy'sini `127.0.0.1:8080` olarak ayarla. EGO Cepte uygulamasını aç, harita bölümüne gir. mitmweb arayüzünde (`localhost:8081`) `ego.gov.tr`'ye giden JSON yanıtlı isteği bul.
+Android emülatör proxy'sini `127.0.0.1:8080` yap → EGO Cepte uygulamasını aç → mitmweb'de JSON yanıtlı isteği bul.
 
 **Yöntem B — Chrome DevTools:**
-`m.ego.gov.tr/otobusnerede` adresini aç → F12 → Network → XHR → Hat numarası gir → JSON döndüren isteği bul.
+`m.ego.gov.tr/otobusnerede` → F12 → Network → XHR
 
 **Beklenen format:**
 ```json
-{
-  "HatNo": "135",
-  "Araclar": [
-    { "Enlem": 39.9334, "Boylam": 32.8597, "Hiz": 35, "Yon": 180 }
-  ]
-}
+{ "HatNo": "135", "Araclar": [{ "Enlem": 39.93, "Boylam": 32.86 }] }
 ```
 
-> API tespit edilmezse `_mock_buses()` otomatik devreye girer.
+> `EGO_API_BASE` boşsa veya API hata verirse `_mock_buses()` devreye girer.
 
 ---
 
@@ -154,69 +151,100 @@ Android emülatör veya telefon proxy'sini `127.0.0.1:8080` olarak ayarla. EGO C
 
 | Method | Endpoint | Açıklama | Güncelleme |
 |---|---|---|---|
-| GET | `/api/v1/traffic/live` | Trafik noktaları (GeoJSON FeatureCollection) | Her 60 saniye |
-| GET | `/api/v1/buses/live` | EGO otobüs konumları (JSON array) | Her 30 saniye |
-| GET | `/api/v1/health` | Servis sağlık durumu | — |
-| — | `/docs` | Swagger UI | — |
+| GET | `/api/v1/traffic/live` | Anlık trafik (GeoJSON) | 60s cache |
+| GET | `/api/v1/buses/live` | EGO otobüs konumları | 30s cache |
+| GET | `/api/v1/traffic/history?hour=N` | Son 7 gün, saat N verisi | PostgreSQL |
+| GET | `/api/v1/traffic/districts` | Bölge yoğunluk % | DB / anlık fallback |
+| GET | `/api/v1/health` | `{"status":"ok","db":bool}` | — |
+| WS | `/ws/traffic` | Anlık push (traffic + buses) | Scheduler broadcast |
+| GET | `/docs` | Swagger UI | — |
 
 ---
 
-## 6. Başlatma
+## 6. WebSocket Protokolü
 
-### Backend
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Linux/Mac
-pip install -r requirements.txt
-cp .env.example .env         # .env içine TomTom key'ini yaz
-uvicorn main:app --reload --port 8000
+```json
+// Bağlantı kurulduğunda (type: snapshot)
+{ "type": "snapshot", "traffic": {...GeoJSON...}, "buses": [...], "timestamp": "..." }
+
+// Her 60s trafik güncelleme
+{ "type": "traffic", "traffic": {...GeoJSON...}, "timestamp": "..." }
+
+// Her 30s otobüs güncelleme
+{ "type": "buses", "buses": [...], "timestamp": "..." }
 ```
 
-### Frontend
+Frontend WS bağlanamazsa (`onerror` / `onclose`) otomatik olarak REST polling'e geçer.
+
+---
+
+## 7. Başlatma
+
+### Sadece Backend + Frontend (DB olmadan)
 ```bash
+# Terminal 1
+cd backend
+python -m venv venv && venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env    # TOMTOM_API_KEY'i yaz
+uvicorn main:app --reload --port 8000
+
+# Terminal 2
 cd frontend
 npm install
-npm run dev                  # http://localhost:5173
+npm run dev
 ```
 
-### Swagger
+### PostgreSQL ile (geçmiş veri aktif)
+```bash
+docker compose up postgres -d
+# backend/.env içindeki DATABASE_URL satırını aktif et
+# uvicorn otomatik yeniden başlar
 ```
-http://localhost:8000/docs
+
+### Tüm servisler Docker ile
+```bash
+docker compose up --build
 ```
 
 ---
 
-## 7. Test Fazları
+## 8. Test
 
-### Faz 1 — Backend Unit Testleri
 ```bash
 cd backend
 pytest tests/ -v
+# 12/12 PASSED
 ```
 
-### Faz 2 — Manuel Kontrol Listesi
-- [ ] `http://localhost:8000/docs` açılıyor
-- [ ] `/api/v1/health` → `{"status": "ok"}` dönüyor
-- [ ] `/api/v1/traffic/live` → features dizisi dolu
-- [ ] `/api/v1/buses/live` → en az 1 otobüs (mock dahil)
-- [ ] `http://localhost:5173` açılıyor
-- [ ] Harita Ankara'yı gösteriyor
-- [ ] Trafik noktaları haritada görünüyor (yeşil/sarı/kırmızı)
-- [ ] Mavi otobüs noktaları görünüyor
-- [ ] Sol altta bilgi paneli ve "Son güncelleme" saati var
-- [ ] 60 saniye sonra trafik verisi yenileniyor
-
-### Faz 3 — EGO Gerçek Veri Entegrasyonu
-- [ ] mitmproxy ile endpoint tespit edildi
-- [ ] `.env` dosyasına `EGO_API_BASE` yazıldı
-- [ ] `/api/v1/buses/live` gerçek otobüs verisi dönüyor
-- [ ] Haritada otobüsler gerçek konumlarda görünüyor
+| Test Dosyası | Kapsam |
+|---|---|
+| `test_api.py` | health (db field), GeoJSON format, CORS, 404 |
+| `test_ego.py` | mock fallback, API hatası, gerçek veri |
+| `test_tomtom.py` | GeoJSON dönüşü, tıkanık ratio, hata toleransı, grup rotasyonu |
 
 ---
 
-## 8. Kota Özeti
+## 9. Deployment
+
+### Railway (Backend + PostgreSQL)
+1. Yeni proje → GitHub repo bağla
+2. `backend/` klasörünü root olarak ayarla
+3. PostgreSQL addon ekle → `DATABASE_URL` otomatik inject edilir
+4. `Procfile` mevcut: `web: uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+### Vercel (Frontend)
+1. `frontend/` klasörünü root olarak ayarla
+2. Build: `npm run build`, Output: `dist`
+3. Env vars:
+   ```
+   VITE_API_BASE=https://your-app.railway.app
+   VITE_WS_BASE=wss://your-app.railway.app
+   ```
+
+---
+
+## 10. Kota Özeti
 
 | Servis | Limit | Günlük Kullanım | Durum |
 |---|---|---|---|
@@ -224,15 +252,34 @@ pytest tests/ -v
 | CARTO Tiles | Sınırsız | — | Ücretsiz |
 | TomTom Traffic | 2.500 req/gün | ~720 req | Güvenli |
 | EGO Cepte | Belirsiz | ~2.880 req | Dikkatli |
+| PostgreSQL | — | Yerel / Railway | Opsiyonel |
 
 ---
 
-## 9. Faz 2 Yol Haritası
+## 11. Faz Durumu
 
-- [ ] PostgreSQL + PostGIS — geçmiş trafik verisi
-- [ ] Time Slider — saate göre geçmiş oynatma
-- [ ] Haftalık ısı haritası — `deck.gl HeatmapLayer`
-- [ ] Bölge sidebar — Çankaya / Yenimahalle / Kızılay yüzdeleri
-- [ ] WebSocket — polling yerine push
-- [ ] Metro/Ankaray güzergah katmanı
-- [ ] Deployment — Vercel (frontend) + Railway (backend)
+### Faz 1 — Tamamlandı
+- [x] TomTom anlık trafik noktaları (8 lokasyon, grup rotasyonu)
+- [x] EGO otobüs konum katmanı (mock fallback)
+- [x] CARTO dark harita, tooltip
+- [x] Otomatik yenileme (60s / 30s)
+- [x] Yoğunluk renk kodlaması (yeşil / sarı / kırmızı)
+- [x] 12 backend unit testi
+
+### Faz 2 — Tamamlandı
+- [x] PostgreSQL + SQLAlchemy async (graceful degradation)
+- [x] `TrafficSnapshot` tablosu — her güncelleme kaydedilir
+- [x] `GET /api/v1/traffic/history?hour=N` — son 7 gün
+- [x] `GET /api/v1/traffic/districts` — 7 bölge istatistik
+- [x] Time Slider — 00:00–23:00 saat seçici
+- [x] HeatmapLayer toggle (Nokta / Isı Haritası)
+- [x] DistrictSidebar — progress bar, 60s auto-refresh
+- [x] WebSocket push + REST polling fallback
+- [x] Docker Compose (postgres servisi)
+- [x] Procfile (Railway)
+
+### Faz 3 — Planlanan
+- [ ] Metro/Ankaray güzergah katmanı (statik GeoJSON)
+- [ ] EGO gerçek endpoint entegrasyonu
+- [ ] Deployment: Vercel + Railway
+- [ ] Haftalık yoğunluk heat map (son 7 gün agregasyonu)
