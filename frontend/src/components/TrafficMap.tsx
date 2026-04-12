@@ -9,8 +9,10 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useHistoricalData } from '../hooks/useHistoricalData';
 import { useMetroData } from '../hooks/useMetroData';
 import { useWeeklyHeatmap } from '../hooks/useWeeklyHeatmap';
+import { usePrediction } from '../hooks/usePrediction';
 import { TimeSlider } from './TimeSlider';
 import DistrictSidebar from './DistrictSidebar';
+import PredictionPanel from './PredictionPanel';
 import type { TrafficPoint, BusPoint } from '../hooks/useTrafficData';
 import type { MetroRoute } from '../hooks/useMetroData';
 
@@ -18,9 +20,10 @@ type ViewMode  = 'live' | 'history' | 'weekly';
 type LayerMode = 'scatter' | 'heat';
 
 function getCongestionColor(ratio: number): [number, number, number, number] {
-  if (ratio >= 0.8) return [0, 208, 132, 220];
-  if (ratio >= 0.5) return [255, 195, 0, 220];
-  return [255, 77, 77, 220];
+  if (ratio >= 0.80) return [0, 208, 132, 220];   // yeşil  — serbest
+  if (ratio >= 0.60) return [255, 210, 0,   220];  // sarı   — yavaş
+  if (ratio >= 0.40) return [255, 120, 0,   230];  // turuncu — yoğun
+  return                    [255,  50, 50,  240];  // kırmızı — tıkanık
 }
 
 export default function TrafficMap() {
@@ -28,8 +31,9 @@ export default function TrafficMap() {
   const [viewMode, setViewMode]       = useState<ViewMode>('live');
   const [layerMode, setLayerMode]     = useState<LayerMode>('scatter');
   const [historyHour, setHistoryHour] = useState<number>(8);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [showMetro, setShowMetro]     = useState(true);
+  const [showSidebar, setShowSidebar]       = useState(true);
+  const [showMetro, setShowMetro]           = useState(true);
+  const [showPrediction, setShowPrediction] = useState(false);
 
   const { trafficData: liveTraffic, busData, lastUpdate, connected } = useWebSocket();
   const { data: historyTraffic, loading: histLoading } = useHistoricalData(
@@ -37,6 +41,7 @@ export default function TrafficMap() {
   );
   const { data: weeklyTraffic, loading: weeklyLoading } = useWeeklyHeatmap(viewMode === 'weekly');
   const { routes: metroRoutes } = useMetroData();
+  const { data: predData, loading: predLoading } = usePrediction(showPrediction);
 
   const activeTraffic: TrafficPoint[] =
     viewMode === 'live'    ? liveTraffic    :
@@ -88,6 +93,10 @@ export default function TrafficMap() {
     radiusMinPixels: 6,
     pickable: true,
     visible: viewMode === 'live',
+    // Otobüs konumları değiştiğinde 28 sn boyunca yumuşak geçiş (30 sn refresh'e denk)
+    transitions: {
+      getPosition: { duration: 28_000, enter: (v: number[]) => v },
+    },
   });
 
   const metroLayer = new PathLayer<MetroRoute>({
@@ -153,17 +162,19 @@ export default function TrafficMap() {
           <button onClick={() => setViewMode('weekly')}  style={btn(viewMode === 'weekly')}>Haftalık {weeklyLoading ? '…' : ''}</button>
         </div>
 
-        {/* Metro + Bölge toggle */}
-        <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
-          <button onClick={() => setShowMetro(s => !s)}  style={btn(showMetro)}>Metro</button>
-          <button onClick={() => setShowSidebar(s => !s)} style={btn(showSidebar)}>Bölgeler</button>
+        {/* Metro + Bölge + Tahmin toggle */}
+        <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowMetro(s => !s)}      style={btn(showMetro)}>Metro</button>
+          <button onClick={() => setShowSidebar(s => !s)}    style={btn(showSidebar)}>Bölgeler</button>
+          <button onClick={() => setShowPrediction(s => !s)} style={btn(showPrediction)}>Tahmin</button>
         </div>
 
         {/* Lejant */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 3, flexWrap: 'wrap' }}>
           <span style={{ color: '#00D084' }}>● Serbest</span>
-          <span style={{ color: '#FFC300' }}>● Yavaş</span>
-          <span style={{ color: '#FF4D4D' }}>● Tıkanık</span>
+          <span style={{ color: '#FFD200' }}>● Yavaş</span>
+          <span style={{ color: '#FF7800' }}>● Yoğun</span>
+          <span style={{ color: '#FF3232' }}>● Tıkanık</span>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ color: '#00C2FF' }}>● EGO Otobüs</span>
@@ -193,6 +204,15 @@ export default function TrafficMap() {
           loading={histLoading}
           onChange={setHistoryHour}
           label="Saate Göre Geçmiş (Son 7 Gün)"
+        />
+      )}
+
+      {/* ── Tahmin Paneli ── */}
+      {showPrediction && (
+        <PredictionPanel
+          data={predData}
+          loading={predLoading}
+          onClose={() => setShowPrediction(false)}
         />
       )}
 

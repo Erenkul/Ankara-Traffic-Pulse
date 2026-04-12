@@ -10,6 +10,7 @@ from ws_manager import manager
 from districts import district_stats_from_features
 from services.history import get_traffic_history, get_district_stats_db, get_weekly_heatmap
 from services.metro import get_metro_routes, get_metro_stations
+from services.predict import get_traffic_prediction
 import os
 
 load_dotenv()
@@ -95,6 +96,12 @@ async def metro_stations():
 async def traffic_weekly():
     """Son 7 günün saatlik ortalama yoğunluğu — haftalık ısı haritası."""
     return await get_weekly_heatmap()
+
+
+@app.get("/api/v1/traffic/predict")
+async def traffic_predict(hours: int = Query(default=4, ge=1, le=12)):
+    """Önümüzdeki N saat için trafik yoğunluk tahmini (ML veya heuristic)."""
+    return await get_traffic_prediction(hours_ahead=hours)
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

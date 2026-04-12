@@ -34,7 +34,9 @@ export function useWebSocket() {
   };
 
   const applyBuses = (buses: { boylam: number; enlem: number; hatNo: string }[]) => {
-    setBusData(buses.map(b => ({
+    // hatNo'ya göre sırala → deck.gl transitions için stabil dizi indeksi
+    const sorted = [...buses].sort((a, b) => a.hatNo.localeCompare(b.hatNo));
+    setBusData(sorted.map(b => ({
       position: [b.boylam, b.enlem] as [number, number],
       hatNo: b.hatNo,
     })));
