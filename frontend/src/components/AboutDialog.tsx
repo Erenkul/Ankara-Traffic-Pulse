@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AUTHOR } from '../constants';
 import type { Meta } from '../hooks/useMeta';
+import { Bus3D, Train3D } from './illustrations';
 
 const SOURCE_TEXT = {
   traffic: { tomtom: 'TomTom Traffic Flow API (canlı)', demo: 'Demo — saatlik Ankara profilinden üretilen örnek veri', none: 'Veri yok' },
@@ -28,6 +29,10 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
           <h2 id="about-title">Ankara Traffic Pulse</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Kapat" autoFocus>✕</button>
         </div>
+        <div className="about-art" aria-hidden="true">
+          <Train3D width={210} color="#dc3232" />
+          <Bus3D width={150} />
+        </div>
         <p>
           Ankara'nın 8 ana koridorundaki 32 noktada trafik yoğunluğunu, EGO otobüslerini ve
           raylı sistem hatlarını tek haritada gösterir. Yoğunluk, anlık hızın serbest akış
@@ -47,6 +52,12 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
               <li>Otobüs: {SOURCE_TEXT.buses[meta.sources.buses]}</li>
               <li>Metro: {SOURCE_TEXT.metro[meta.sources.metro]}</li>
               <li>Geçmiş veri: {meta.db ? 'PostgreSQL bağlı' : 'veritabanı yok'}</li>
+              <li>
+                Ankara açık veri (otopark, bisiklet yolu):{' '}
+                {meta.openData && (meta.openData.parking || meta.openData.bike)
+                  ? `${meta.openData.parking} otopark, ${meta.openData.bike} bisiklet yolu`
+                  : 'şu an veri alınamıyor'}
+              </li>
             </ul>
           </div>
         )}
@@ -56,6 +67,12 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
           <a href={AUTHOR.repo} target="_blank" rel="noreferrer">GitHub</a>
           <br />
           FastAPI · React · Deck.gl · MapLibre · Harita © CARTO © OpenStreetMap
+          <br />
+          Açık veri: Ankara Büyükşehir Belediyesi —{' '}
+          <a href="https://seffaf.ankara.bel.tr/" target="_blank" rel="noreferrer">Şeffaf Ankara</a>,{' '}
+          <a href="https://ulasav.csb.gov.tr/" target="_blank" rel="noreferrer">ULASAV</a>
+          <br />
+          Metro trenleri temsilidir; illüstrasyonlar projeye özel çizilmiştir.
         </p>
       </div>
     </div>

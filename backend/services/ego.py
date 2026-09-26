@@ -53,6 +53,7 @@ def _normalize(raw: list) -> list:
                 "enlem": float(item["Enlem"]),
                 "boylam": float(item["Boylam"]),
                 "hiz": item.get("Hiz", item.get("hiz", 0)),
+                "yon": item.get("Yon", item.get("yon")),
             })
         # Format B: {enlem, boylam, hatNo}
         elif "enlem" in item:
@@ -61,6 +62,7 @@ def _normalize(raw: list) -> list:
                 "enlem": float(item["enlem"]),
                 "boylam": float(item["boylam"]),
                 "hiz": item.get("hiz", 0),
+                "yon": item.get("yon"),
             })
     return result
 

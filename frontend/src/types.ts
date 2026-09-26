@@ -10,6 +10,8 @@ export interface BusPoint {
   position: [number, number];
   hatNo: string;
   hiz?: number;
+  /** Gidiş yönü, kuzeyden saat yönünde derece */
+  yon?: number;
 }
 
 export interface TrafficFeatureCollection {
@@ -29,6 +31,7 @@ export interface RawBus {
   enlem: number;
   boylam: number;
   hiz?: number | null;
+  yon?: number | null;
 }
 
 export function toTrafficPoints(fc: TrafficFeatureCollection): TrafficPoint[] {
@@ -49,5 +52,6 @@ export function toBusPoints(buses: RawBus[]): BusPoint[] {
       position: [b.boylam, b.enlem] as [number, number],
       hatNo: b.hatNo,
       hiz: b.hiz ?? undefined,
+      yon: b.yon ?? undefined,
     }));
 }

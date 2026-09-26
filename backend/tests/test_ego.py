@@ -39,6 +39,6 @@ async def test_returns_real_data_when_api_ok(monkeypatch):
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = _make_response(fake_buses)
         result = await fetch_ego_buses()
-        assert result == fake_buses
+        assert result == [{**fake_buses[0], "yon": None}]
         import services.ego as ego
         assert ego.last_source == "ego"

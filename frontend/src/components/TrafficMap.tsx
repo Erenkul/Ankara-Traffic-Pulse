@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { DeckGL } from '@deck.gl/react';
-import { ScatterplotLayer, PathLayer, TextLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PathLayer, TextLayer, IconLayer, ColumnLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { ANKARA_CENTER, CARTO_STYLE, LEVEL_COLORS } from '../constants';
@@ -15,10 +15,14 @@ import { TimeSlider } from './TimeSlider';
 import DistrictSidebar from './DistrictSidebar';
 import PredictionPanel from './PredictionPanel';
 import AboutDialog from './AboutDialog';
+import TransitPanel from './TransitPanel';
+import { BUS_ICON, PARKING_ICON, trainIcon } from './illustrations';
+import { useTrains, type TrainPoint } from '../hooks/useTrains';
+import { useOpenData, type ParkingPoint, type BikePath } from '../hooks/useOpenData';
 import type { TrafficPoint, BusPoint } from '../types';
 
 type ViewMode  = 'live' | 'history' | 'weekly';
-type LayerMode = 'scatter' | 'heat';
+type LayerMode = 'scatter' | 'heat' | 'columns';
 type ViewState = typeof ANKARA_CENTER & { pitch?: number; bearing?: number; transitionDuration?: number };
 
 // Canlı veri bu süreden eskiyse kullanıcı uyarılır
@@ -52,6 +56,21 @@ function SourceBadge({ label, live }: { label: string; live: boolean | null }) {
 function tooltipFor(o: unknown, lineColors: Record<string, [number, number, number]>) {
   if (!o || typeof o !== 'object') return null;
   let html = '';
+  if ('bearing' in o && 'lineId' in o) {
+    const t = o as TrainPoint;
+    return { html: `<div class="tt-title">${t.name}</div><div class="tt-sub">Temsili tren · canlı konum değil</div>` };
+  }
+  if ('path' in o && !('id' in o)) {
+    const b = o as BikePath;
+    return { html: `<div class="tt-title">Bisiklet yolu</div>${b.name ? `<div class="tt-sub">${b.name}</div>` : ''}` };
+  }
+  if ('capacity' in o || 'free' in o || ('name' in o && !('lines' in o) && !('path' in o))) {
+    const pk = o as ParkingPoint;
+    const parts = [];
+    if (pk.free !== undefined) parts.push(`${pk.free} boş`);
+    if (pk.capacity !== undefined) parts.push(`${pk.capacity} kapasite`);
+    return { html: `<div class="tt-title">${pk.name ?? 'Otopark'}</div>${parts.length ? `<div class="tt-sub">${parts.join(' · ')}</div>` : ''}` };
+  }
   if ('congestionRatio' in o) {
     const t = o as TrafficPoint;
     const pct = Math.round((1 - t.congestionRatio) * 100);
@@ -87,6 +106,9 @@ export default function TrafficMap() {
   const [showPrediction, setShowPrediction] = useState(false);
   const [showControls, setShowControls]     = useState(!IS_NARROW);
   const [showAbout, setShowAbout]           = useState(false);
+  const [showTransit, setShowTransit]       = useState(!IS_NARROW);
+  const [showParking, setShowParking]       = useState(true);
+  const [showBike, setShowBike]             = useState(true);
 
   const { trafficData: liveTraffic, busData, lastUpdate, connected } = useWebSocket();
   const { data: historyTraffic, loading: histLoading } = useHistoricalData(
@@ -96,6 +118,9 @@ export default function TrafficMap() {
   const { paths: metroPaths, stations, lineColors } = useMetroData();
   const { data: predData, loading: predLoading } = usePrediction(showPrediction);
   const { meta, reachable } = useMeta();
+  const trains = useTrains(metroPaths, showMetro);
+  const { parking, bike, sources: openSources } = useOpenData(meta?.openData);
+  const lines = Object.values(Object.fromEntries(metroPaths.map(p => [p.id, { id: p.id, name: p.name, color: p.color }])));
 
   // "x dk önce" göstergesi için saat
   const [now, setNow] = useState(() => Date.now());
@@ -112,15 +137,38 @@ export default function TrafficMap() {
     weeklyTraffic;
 
   const resetView = useCallback(() => {
-    setViewState({ ...ANKARA_CENTER, pitch: 0, bearing: 0, transitionDuration: 700 } as ViewState);
-  }, []);
+    setViewState({ ...ANKARA_CENTER, pitch: layerMode === 'columns' ? 52 : 0,
+      bearing: layerMode === 'columns' ? -18 : 0, transitionDuration: 700 } as ViewState);
+  }, [layerMode]);
 
   const zoom = viewState.zoom;
   const toggleHeat = layerMode === 'heat';
+  const columns = layerMode === 'columns';
+
+  const setLayer = (mode: LayerMode) => {
+    setLayerMode(mode);
+    // 3B sütunlarda kamerayı eğ, diğerlerinde düz görünüme dön
+    setViewState(vs => ({
+      ...vs,
+      pitch: mode === 'columns' ? 52 : 0,
+      bearing: mode === 'columns' ? -18 : 0,
+      transitionDuration: 700,
+    }));
+  };
 
   // ── Katmanlar ───────────────────────────────────────────────────────────────
 
   const layers = [
+    new PathLayer<BikePath>({
+      id: 'bike-layer',
+      data: bike,
+      getPath: d => d.path,
+      getColor: [120, 220, 150, 190],
+      getWidth: 2.5,
+      widthUnits: 'pixels',
+      pickable: true,
+      visible: showBike && bike.length > 0,
+    }),
     new PathLayer<MetroPath>({
       id: 'metro-layer',
       data: metroPaths,
@@ -158,7 +206,22 @@ export default function TrafficMap() {
       getRadius: 18,
       radiusUnits: 'pixels',
       getFillColor: d => { const c = getCongestionColor(d.congestionRatio); return [c[0], c[1], c[2], 45]; },
-      visible: !toggleHeat,
+      visible: layerMode === 'scatter',
+    }),
+    new ColumnLayer<TrafficPoint>({
+      id: 'traffic-columns',
+      data: activeTraffic,
+      getPosition: d => d.position,
+      diskResolution: 16,
+      radius: 160,
+      extruded: true,
+      // Yoğunluk arttıkça sütun yükselir (yüzde × 30 m)
+      getElevation: d => Math.max(0.03, 1 - d.congestionRatio) * 3000,
+      getFillColor: d => getCongestionColor(d.congestionRatio),
+      material: { ambient: 0.5, diffuse: 0.6, shininess: 20 },
+      pickable: true,
+      visible: columns,
+      transitions: { getElevation: 800, getFillColor: 600 },
     }),
     new ScatterplotLayer<TrafficPoint>({
       id: 'traffic-scatter',
@@ -171,7 +234,7 @@ export default function TrafficMap() {
       stroked: true,
       lineWidthMinPixels: 1.5,
       pickable: true,
-      visible: !toggleHeat,
+      visible: layerMode === 'scatter',
       transitions: { getFillColor: 600 },
     }),
     new ScatterplotLayer<MetroStation>({
@@ -202,16 +265,38 @@ export default function TrafficMap() {
       fontSettings: { sdf: true },
       visible: showMetro && zoom >= 13.5,
     }),
-    new ScatterplotLayer<BusPoint>({
+    new IconLayer<ParkingPoint>({
+      id: 'parking-layer',
+      data: parking,
+      getPosition: d => d.position,
+      getIcon: () => PARKING_ICON,
+      getSize: 26,
+      sizeUnits: 'pixels',
+      pickable: true,
+      visible: showParking && parking.length > 0 && zoom >= 11,
+    }),
+    new IconLayer<TrainPoint>({
+      id: 'train-layer',
+      data: trains,
+      getPosition: d => d.position,
+      getIcon: d => trainIcon(d.color),
+      getSize: 44,
+      sizeUnits: 'pixels',
+      getAngle: d => -d.bearing,
+      billboard: false,
+      pickable: true,
+      visible: showMetro,
+      transitions: { getPosition: { duration: 2000, enter: (v: number[]) => v } },
+    }),
+    new IconLayer<BusPoint>({
       id: 'bus-layer',
       data: busData,
       getPosition: d => d.position,
-      getRadius: 6,
-      radiusUnits: 'pixels',
-      getFillColor: [0, 194, 255, 235],
-      getLineColor: [11, 15, 22, 255],
-      stroked: true,
-      lineWidthMinPixels: 1.5,
+      getIcon: () => BUS_ICON,
+      getSize: 30,
+      sizeUnits: 'pixels',
+      getAngle: d => -(d.yon ?? 0),
+      billboard: false,
       pickable: true,
       visible: viewMode === 'live' && showBuses,
       // Konum değiştiğinde 28 sn boyunca yumuşak geçiş (30 sn yenilemeye denk)
@@ -224,7 +309,7 @@ export default function TrafficMap() {
       getText: d => d.hatNo,
       getSize: 10,
       getColor: [0, 194, 255, 255],
-      getPixelOffset: [0, -13],
+      getPixelOffset: [0, -18],
       characterSet: 'auto',
       fontFamily: 'IBM Plex Mono, monospace',
       outlineWidth: 3,
@@ -301,16 +386,30 @@ export default function TrafficMap() {
             <div className="control-group">
               <span className="panel-title">Gösterim</span>
               <div className="segmented" role="group" aria-label="Gösterim">
-                <button aria-pressed={layerMode === 'scatter'} onClick={() => setLayerMode('scatter')}>Noktalar</button>
-                <button aria-pressed={layerMode === 'heat'}    onClick={() => setLayerMode('heat')}>Isı haritası</button>
+                <button aria-pressed={layerMode === 'scatter'} onClick={() => setLayer('scatter')}>Noktalar</button>
+                <button aria-pressed={layerMode === 'heat'}    onClick={() => setLayer('heat')}>Isı</button>
+                <button aria-pressed={layerMode === 'columns'} onClick={() => setLayer('columns')}>3B sütun</button>
               </div>
             </div>
 
             <div className="control-group">
               <span className="panel-title">Katmanlar</span>
               <div className="toggles">
-                <button aria-pressed={showBuses}      onClick={() => setShowBuses(s => !s)}><i />Otobüs</button>
-                <button aria-pressed={showMetro}      onClick={() => setShowMetro(s => !s)}><i />Raylı sistem</button>
+                <button aria-pressed={showBuses} onClick={() => setShowBuses(s => !s)}>
+                  <img className="ico" src={BUS_ICON.url} alt="" />Otobüs
+                </button>
+                <button aria-pressed={showMetro} onClick={() => setShowMetro(s => !s)}>
+                  <img className="ico" src={trainIcon([220, 50, 50]).url} alt="" />Raylı sistem
+                </button>
+                {parking.length > 0 && (
+                  <button aria-pressed={showParking} onClick={() => setShowParking(s => !s)}>
+                    <img className="ico" src={PARKING_ICON.url} alt="" />Otopark
+                  </button>
+                )}
+                {bike.length > 0 && (
+                  <button aria-pressed={showBike} onClick={() => setShowBike(s => !s)}><i />Bisiklet</button>
+                )}
+                <button aria-pressed={showTransit}    onClick={() => setShowTransit(s => !s)}><i />Ulaşım paneli</button>
                 <button aria-pressed={showSidebar}    onClick={() => setShowSidebar(s => !s)}><i />Bölgeler</button>
                 <button aria-pressed={showPrediction} onClick={() => setShowPrediction(s => !s)}><i />Tahmin</button>
               </div>
@@ -329,7 +428,7 @@ export default function TrafficMap() {
               </div>
               {(showMetro || showBuses) && (
                 <div className="legend-lines">
-                  {showBuses && <span><b className="bus" />EGO</span>}
+                  {showBuses && <span><img src={BUS_ICON.url} alt="" style={{ height: 14 }} />EGO</span>}
                   {showMetro && Object.entries(lineColors).map(([id, c]) => (
                     <span key={id}><b style={{ background: `rgb(${c.join(',')})` }} />{id === 'A1' ? 'Ankaray' : id}</span>
                   ))}
@@ -359,10 +458,22 @@ export default function TrafficMap() {
       )}
 
       {/* ── Sağ panel sütunu ── */}
-      {(showPrediction || showSidebar) && (
+      {(showPrediction || showSidebar || showTransit) && (
         <div className={`right-col${viewMode === 'history' ? ' with-slider' : ''}`}>
           {showPrediction && (
             <PredictionPanel data={predData} loading={predLoading} onClose={() => setShowPrediction(false)} />
+          )}
+          {showTransit && (
+            <TransitPanel
+              busCount={busData.length}
+              busLive={busesLive}
+              lines={lines}
+              metroSource={meta?.sources.metro}
+              parking={parking}
+              bikeCount={bike.length}
+              openSources={openSources}
+              onClose={() => setShowTransit(false)}
+            />
           )}
           {showSidebar && <DistrictSidebar onClose={() => setShowSidebar(false)} />}
         </div>

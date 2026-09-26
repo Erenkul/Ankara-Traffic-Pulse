@@ -10,6 +10,8 @@ export interface Sources {
 export interface Meta {
   sources: Sources;
   db: boolean;
+  /** Açık veri katmanlarındaki öğe sayısı (0 = veri yok) */
+  openData?: { parking: number; bike: number };
 }
 
 /** Veri kaynaklarını (gerçek / demo) dakikada bir sorgular. */

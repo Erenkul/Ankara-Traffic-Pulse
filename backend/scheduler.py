@@ -4,6 +4,7 @@ from services.tomtom import fetch_ankara_traffic
 from services.ego import fetch_ego_buses
 from services.history import save_traffic_snapshot, purge_old_snapshots
 from services.metro import refresh_metro_from_osm
+from services.opendata import refresh_parking, refresh_bike
 import os
 from cache import update_traffic, update_buses, set_source
 from services import ego
@@ -19,6 +20,9 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(refresh_buses,   'interval', seconds=BUS_REFRESH_SECONDS,     next_run_time=now)
     scheduler.add_job(refresh_metro_from_osm, 'interval', hours=24, next_run_time=now)
     scheduler.add_job(purge_old, 'interval', hours=24, next_run_time=now)
+    # Açık veri: otopark doluluğu sık değişir, bisiklet yolları nadiren
+    scheduler.add_job(refresh_parking, 'interval', minutes=10, next_run_time=now)
+    scheduler.add_job(refresh_bike, 'interval', hours=24, next_run_time=now)
     scheduler.start()
     return scheduler
 

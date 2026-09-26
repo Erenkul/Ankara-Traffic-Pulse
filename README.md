@@ -8,7 +8,10 @@ Ankara'nın 8 ana koridorundaki anlık trafik yoğunluğunu, EGO otobüslerini v
 
 - **Canlı trafik:** 8 koridorda 32 ölçüm noktası. Renk, anlık hızın serbest akış hızına oranından gelir.
 - **EGO otobüsleri:** Konumlar 30 sn'de bir yenilenir, araçlar aradaki yolu kayarak alır.
-- **Raylı sistem:** M1, M2, M3, M4 ve Ankaray. Güzergâhlar OpenStreetMap'ten günde bir çekilir.
+- **Raylı sistem:** M1, M2, M3, M4 ve Ankaray. Güzergâhlar OpenStreetMap'ten günde bir çekilir; hatlar üzerinde temsili trenler hareket eder.
+- **3B görünüm:** "3B sütun" modunda kamera eğilir, her ölçüm noktası yoğunluğu kadar yükselen bir sütun olur.
+- **Ulaşım paneli:** Projeye özel çizilmiş izometrik otobüs, metro treni ve otopark görselleri; hat seçince tren hat rengine boyanır.
+- **Ankara açık veri:** ULASAV / Şeffaf Ankara'dan otopark (doluluk) ve bisiklet yolu katmanları. Veri bulunamazsa katman gizlenir.
 - **Geçmiş ve haftalık:** Son 7 günün seçilen saati ya da ortalaması (PostgreSQL gerekir).
 - **Bölge yoğunluğu:** 7 bölge için yüzde hız kaybı.
 - **Tahmin:** Önümüzdeki 4 saat. Yeterli veri varsa Ridge regresyonu, yoksa Ankara saatlik profili.
@@ -61,7 +64,7 @@ docker compose up --build
 ### Testler
 
 ```bash
-cd backend && python -m pytest -q          # 29 test
+cd backend && python -m pytest -q          # 35 test
 cd frontend && npm run lint && npm run build
 ```
 
@@ -79,6 +82,9 @@ cd frontend && npm run lint && npm run build
    | `CORS_ORIGIN` | `https://alperenkul.com,https://<vercel-adresi>.vercel.app` |
    | `EGO_API_BASE` | EGO servis adresi (boşsa demo otobüs) |
    | `RETENTION_DAYS` | Geçmiş kayıt saklama süresi, varsayılan `30` |
+   | `PARKING_RESOURCE_URL` | (İsteğe bağlı) Otopark veri setinin doğrudan indirme adresi |
+   | `BIKE_RESOURCE_URL` | (İsteğe bağlı) Bisiklet yolu veri setinin doğrudan indirme adresi |
+   | `OPEN_DATA` | `off` yapılırsa açık veri katmanları kapanır |
 
 4. **Settings → Networking → Generate Domain** ile genel adres al (ör. `atp-api.up.railway.app`).
 
@@ -108,7 +114,8 @@ cd frontend && npm run lint && npm run build
 | `GET /api/v1/traffic/districts` | Bölge bazında yoğunluk |
 | `GET /api/v1/traffic/predict?hours=N` | Önümüzdeki N saat tahmini |
 | `GET /api/v1/metro/routes` · `/metro/stations` | Raylı sistem hatları ve istasyonlar |
-| `GET /api/v1/meta` | Veri kaynakları: gerçek mi, demo mu |
+| `GET /api/v1/meta` | Veri kaynakları: gerçek mi, demo mu; açık veri katman sayıları |
+| `GET /api/v1/opendata/{parking,bike}` | Ankara açık veri katmanları (GeoJSON + kaynak/lisans bilgisi) |
 | `GET /api/v1/health` | Servis, DB, cache ve bağlantı durumu |
 | `WS  /ws/traffic` | Anlık yayın (`ping` → `pong`) |
 | `GET /docs` | Swagger arayüzü |
@@ -124,6 +131,8 @@ TomTom'un ücretsiz katmanı günde 2.500 istek verir. Her turda 4 nokta sorgula
 | Trafik noktasının cache ömrü | 45 dk |
 | Otobüs konumları | 30 sn |
 | Raylı sistem verisi (OSM) | 24 saat |
+| Otopark doluluğu (açık veri) | 10 dk |
+| Bisiklet yolları (açık veri) | 24 saat |
 | Eski kayıt temizliği | 24 saatte bir, `RETENTION_DAYS` günden eski |
 | Tahmin modelinin yeniden eğitimi | 15 dk |
 
@@ -132,7 +141,8 @@ TomTom'un ücretsiz katmanı günde 2.500 istek verir. Her turda 4 nokta sorgula
 - **TomTom Traffic Flow API:** [developer.tomtom.com](https://developer.tomtom.com). Kredi kartı gerekmez.
 - **EGO:** Resmi ve herkese açık bir canlı otobüs API'si yok. EGO Cepte uygulamasının kullandığı uç noktalar belgelenmemiştir ve değişebilir. `EGO_API_BASE` tanımlıysa `services/ego.py` bilinen adresleri dener, yanıt alamazsa demo veriye geçer.
 - **OpenStreetMap:** Raylı sistem güzergâhları Overpass API ile çekilir (© OpenStreetMap katkıcıları, ODbL). Erişilemezse doğrulanmış istasyon koordinatlarından oluşan yerleşik veri kullanılır.
-- **Ankara açık veri:** [Şeffaf Ankara](https://seffaf.ankara.bel.tr/) ve [ulasav.csb.gov.tr](https://ulasav.csb.gov.tr/) üzerinde Ankara Büyükşehir veri setleri yayınlanıyor; ileride durak/hat verisi için değerlendirilebilir.
+- **Ankara açık veri:** [ULASAV](https://ulasav.csb.gov.tr/dataset/?organization=ankara-buyuksehir-belediyesi) bir CKAN portalıdır ve Ankara Büyükşehir'in 340+ veri setini barındırır. `services/opendata.py` CKAN arama API'siyle (`/api/3/action/package_search`) Ankara organizasyonunda "otopark" ve "bisiklet" veri setlerini bulur, GeoJSON → JSON → CSV sırasıyla uygun kaynağı indirir. Türkçe sütun adları (ENLEM, BOYLAM, KAPASİTE, BOŞ…), ondalık virgül ve yer değiştirmiş koordinatlar otomatik tanınır; Ankara dışındaki ya da projeksiyonlu koordinatlar elenir. [Şeffaf Ankara](https://seffaf.ankara.bel.tr/)'dan bir veri setinin indirme bağlantısını `PARKING_RESOURCE_URL` / `BIKE_RESOURCE_URL` ile doğrudan da verebilirsin. Veriler [Ankara Büyükşehir açık veri lisansı](https://seffaf.ankara.bel.tr/resources/images/hakkimizda/lisans.pdf) ile kullanılır; atıf arayüzde ve API yanıtında yer alır.
+- **Tren konumları:** EGO raylı sistem için canlı konum yayınlamaz. Haritadaki trenler ortalama 35 km/s ile hat boyunca hareket eden temsili araçlardır.
 
 ## Faz durumu
 

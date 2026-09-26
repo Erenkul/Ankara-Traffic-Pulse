@@ -67,7 +67,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   right: var(--gutter);
   width: 270px;
   display: flex; flex-direction: column; gap: 10px;
-  max-height: calc(100% - 2 * var(--gutter));
+  /* altta harita telif yazısına yer bırak */
+  max-height: calc(100% - 2 * var(--gutter) - 30px);
   overflow-y: auto;
   z-index: 2;
 }
@@ -206,3 +207,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 @media (prefers-reduced-motion: reduce) {
   .track > div { transition: none; }
 }
+
+/* Ulaşım paneli */
+.transit-block { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.transit-block:last-child { border-bottom: 0; padding-bottom: 0; }
+.transit-art { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 70%, rgba(59, 140, 255, 0.12), transparent 70%); border-radius: 10px; padding: 6px 0; }
+.transit-text { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.transit-text strong { font-weight: 600; }
+a.card-note { color: var(--accent); text-decoration: none; }
+a.card-note:hover { text-decoration: underline; }
+.line-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.line-chips button {
+  border: 1px solid var(--line); color: var(--ink); background: transparent;
+  font-family: var(--mono); font-size: 11.5px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+}
+.line-chips button[aria-pressed="true"] { background: var(--line); color: #fff; }
+.toggles .ico { width: 18px; height: 18px; display: inline-grid; place-items: center; }
+.about-art { display: flex; justify-content: center; align-items: flex-end; gap: 18px; flex-wrap: wrap; }

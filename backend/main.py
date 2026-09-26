@@ -12,6 +12,8 @@ from districts import district_stats_from_features
 from services.history import get_traffic_history, get_district_stats_db, get_weekly_heatmap
 from services.metro import get_metro_routes, get_metro_stations
 from services.predict import get_traffic_prediction
+from services import opendata
+from fastapi import HTTPException
 import os
 
 
@@ -66,7 +68,15 @@ def _sources() -> dict:
 async def meta():
     """Arayüz için veri kaynakları: traffic tomtom|demo, buses ego|demo, metro osm|static."""
     from database import DB_AVAILABLE
-    return {"sources": _sources(), "db": DB_AVAILABLE}
+    return {"sources": _sources(), "db": DB_AVAILABLE, "openData": opendata.availability()}
+
+
+@app.get("/api/v1/opendata/{layer}")
+async def open_data_layer(layer: str):
+    """Ankara açık veri katmanı (parking | bike) — ULASAV / Şeffaf Ankara."""
+    if layer not in opendata.LAYERS:
+        raise HTTPException(status_code=404, detail="Bilinmeyen katman")
+    return opendata.get_layer(layer)
 
 
 # ── Faz 2 endpoint'leri ─────────────────────────────────────────────────────
