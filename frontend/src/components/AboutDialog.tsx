@@ -66,7 +66,7 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
           <a href={AUTHOR.site} target="_blank" rel="noreferrer">alperenkul.com</a> ·{' '}
           <a href={AUTHOR.repo} target="_blank" rel="noreferrer">GitHub</a>
           <br />
-          FastAPI · React · Deck.gl · MapLibre · Harita © CARTO © OpenStreetMap
+          FastAPI · React · Deck.gl · MapLibre · Harita © OpenFreeMap © OpenMapTiles © OpenStreetMap
           <br />
           Açık veri: Ankara Büyükşehir Belediyesi (Şeffaf Ankara Lisansı) —{' '}
           <a href="https://seffaf.ankara.bel.tr/" target="_blank" rel="noreferrer">Şeffaf Ankara</a>,{' '}

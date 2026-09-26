@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Map } from 'react-map-gl/maplibre';
+import { Map, AttributionControl } from 'react-map-gl/maplibre';
 import { DeckGL } from '@deck.gl/react';
 import { ScatterplotLayer, PathLayer, TextLayer, IconLayer, ColumnLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ANKARA_CENTER, CARTO_STYLE, LEVEL_COLORS } from '../constants';
+import { ANKARA_CENTER, MAP_STYLE, LEVEL_COLORS } from '../constants';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useHistoricalData } from '../hooks/useHistoricalData';
 import { useMetroData, type MetroPath, type MetroStation } from '../hooks/useMetroData';
@@ -381,7 +381,9 @@ export default function TrafficMap() {
         style={{ width: '100%', height: '100%' }}
         getTooltip={(info: { object?: unknown }) => tooltipFor(info.object, lineColors)}
       >
-        <Map mapStyle={CARTO_STYLE} />
+        <Map mapStyle={MAP_STYLE} attributionControl={false}>
+          <AttributionControl compact position="bottom-right" />
+        </Map>
       </DeckGL>
 
       {/* ── Sol üst: başlık + kontroller ── */}

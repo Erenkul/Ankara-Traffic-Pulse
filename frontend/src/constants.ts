@@ -10,18 +10,11 @@ export const ANKARA_CENTER = {
   zoom: 12
 };
 
-export const CARTO_STYLE = {
-  version: 8 as const,
-  sources: {
-    carto: {
-      type: 'raster' as const,
-      tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© CARTO © OpenStreetMap'
-    }
-  },
-  layers: [{ id: 'carto-layer', type: 'raster' as const, source: 'carto' }]
-};
+// Altlık harita: OpenFreeMap koyu vektör stili — ücretsiz, API anahtarı gerekmez.
+// (CARTO karoları artık anahtarsız isteklerde "API KEY REQUIRED" görseli döndürüyor.)
+// VITE_MAP_STYLE ile başka bir MapLibre stil adresi verilebilir.
+export const MAP_STYLE: string =
+  import.meta.env.VITE_MAP_STYLE ?? 'https://tiles.openfreemap.org/styles/dark';
 
 export const TRAFFIC_REFRESH_MS = 60_000;
 

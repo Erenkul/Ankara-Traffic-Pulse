@@ -30,7 +30,7 @@ Ankara'nın 8 ana koridorundaki anlık trafik yoğunluğunu, EGO otobüslerini v
 - **Backend:** Python FastAPI, APScheduler, SQLAlchemy (async), scikit-learn
 - **Veritabanı:** PostgreSQL (opsiyonel, olmadan da çalışır)
 - **Gerçek zamanlı:** WebSocket, bağlantı koparsa REST yedeği ve otomatik yeniden bağlanma
-- **Veri:** TomTom Traffic Flow API, EGO, OpenStreetMap (Overpass), CARTO harita karoları
+- **Veri:** TomTom Traffic Flow API, EGO, OpenStreetMap (Overpass), OpenFreeMap vektör altlık haritası (anahtarsız)
 
 ## Yerelde çalıştırma
 
@@ -158,4 +158,4 @@ TomTom'un ücretsiz katmanı günde 2.500 istek verir. Her turda 4 nokta sorgula
 
 ## Lisans ve atıf
 
-Harita karoları © CARTO, © OpenStreetMap katkıcıları. Trafik verisi © TomTom.
+Altlık harita © OpenFreeMap, © OpenMapTiles, © OpenStreetMap katkıcıları. Trafik verisi © TomTom.
