@@ -53,10 +53,10 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
               <li>Metro: {SOURCE_TEXT.metro[meta.sources.metro]}</li>
               <li>Geçmiş veri: {meta.db ? 'PostgreSQL bağlı' : 'veritabanı yok'}</li>
               <li>
-                Ankara açık veri (otopark, bisiklet yolu):{' '}
-                {meta.openData && (meta.openData.parking || meta.openData.bike)
-                  ? `${meta.openData.parking} otopark, ${meta.openData.bike} bisiklet yolu`
-                  : 'şu an veri alınamıyor'}
+                Otopark / bisiklet:{' '}
+                {meta.openData
+                  ? `${meta.openData.parking} otopark, ${meta.openData.bikestations} bisiklet parkı, ${meta.openData.bike} bisiklet yolu parçası`
+                  : 'veri alınamadı'}
               </li>
             </ul>
           </div>
@@ -68,9 +68,9 @@ export default function AboutDialog({ meta, onClose }: { meta: Meta | null; onCl
           <br />
           FastAPI · React · Deck.gl · MapLibre · Harita © CARTO © OpenStreetMap
           <br />
-          Açık veri: Ankara Büyükşehir Belediyesi —{' '}
+          Açık veri: Ankara Büyükşehir Belediyesi (Şeffaf Ankara Lisansı) —{' '}
           <a href="https://seffaf.ankara.bel.tr/" target="_blank" rel="noreferrer">Şeffaf Ankara</a>,{' '}
-          <a href="https://ulasav.csb.gov.tr/" target="_blank" rel="noreferrer">ULASAV</a>
+          <a href="https://ulasav.csb.gov.tr/" target="_blank" rel="noreferrer">ULASAV</a>; OpenStreetMap (ODbL)
           <br />
           Metro trenleri temsilidir; illüstrasyonlar projeye özel çizilmiştir.
         </p>

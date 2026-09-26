@@ -224,3 +224,21 @@ a.card-note:hover { text-decoration: underline; }
 .line-chips button[aria-pressed="true"] { background: var(--line); color: #fff; }
 .toggles .ico { width: 18px; height: 18px; display: inline-grid; place-items: center; }
 .about-art { display: flex; justify-content: center; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
+
+/* Otopark / bisiklet listeleri */
+.inline-ico { display: inline-flex; align-items: center; gap: 6px; }
+.inline-ico img { width: 18px; height: 18px; }
+.ico-line { display: inline-block; width: 16px; height: 3px; border-radius: 2px; background: #3cd278; flex: none; }
+.occ-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
+.occ-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.occ-legend img { width: 14px; height: 14px; }
+.place-list { list-style: none; display: flex; flex-direction: column; gap: 2px; margin: 2px 0; }
+.place-list button {
+  width: 100%; display: flex; align-items: center; gap: 8px; text-align: left;
+  background: transparent; border: 0; border-radius: 6px; padding: 4px 6px; cursor: pointer; font-size: 12.5px;
+}
+.place-list button:hover { background: rgba(255, 255, 255, 0.06); }
+.place-list img { width: 18px; height: 18px; flex: none; }
+.pl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-val { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.toggles button .ico-line { width: 14px; }

@@ -10,11 +10,10 @@ from __future__ import annotations
 import logging
 import time
 
-import httpx
+from services.overpass import overpass_query
 
 logger = logging.getLogger(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 _BBOX = "39.80,32.45,40.10,33.00"  # güney, batı, kuzey, doğu
 _CACHE_TTL = 24 * 3600
 
@@ -87,13 +86,19 @@ def _static_stations() -> dict:
 
 
 # ── OpenStreetMap ────────────────────────────────────────────────────────────
-_OVERPASS_QUERY = f"""
-[out:json][timeout:25];
+_ROUTES_QUERY = f"""
+[out:json][timeout:90];
 relation["route"~"^(subway|light_rail)$"]({_BBOX});
 out geom;
+"""
+_STATIONS_QUERY = f"""
+[out:json][timeout:60];
 node["railway"="station"]["station"~"^(subway|light_rail)$"]({_BBOX});
 out;
 """
+
+# Ray parçaları: çoğu hatta rol boş, Ankaray'da "route"; platform/durak rollerini dışla
+_TRACK_ROLES = {"", "route", "forward", "backward"}
 
 _cache: dict = {"routes": None, "stations": None, "fetched_at": None}
 
@@ -120,7 +125,7 @@ def parse_overpass(data: dict) -> tuple[dict, dict] | None:
             parts = [
                 [[p["lon"], p["lat"]] for p in m["geometry"]]
                 for m in el.get("members", [])
-                if m.get("type") == "way" and m.get("role", "") == "" and m.get("geometry")
+                if m.get("type") == "way" and m.get("role", "") in _TRACK_ROLES and m.get("geometry")
             ]
             size = sum(len(p) for p in parts)
             # Her yön için ayrı relation var; en ayrıntılısını tut
@@ -162,10 +167,9 @@ def parse_overpass(data: dict) -> tuple[dict, dict] | None:
 
 async def refresh_metro_from_osm() -> bool:
     try:
-        async with httpx.AsyncClient(timeout=40) as client:
-            r = await client.post(OVERPASS_URL, data={"data": _OVERPASS_QUERY})
-            r.raise_for_status()
-            parsed = parse_overpass(r.json())
+        routes = await overpass_query(_ROUTES_QUERY)
+        stations = await overpass_query(_STATIONS_QUERY)
+        parsed = parse_overpass({"elements": routes.get("elements", []) + stations.get("elements", [])})
     except Exception as e:
         logger.warning(f"Metro verisi OSM'den alınamadı, statik veri kullanılıyor: {e}")
         return False

@@ -16,9 +16,9 @@ import DistrictSidebar from './DistrictSidebar';
 import PredictionPanel from './PredictionPanel';
 import AboutDialog from './AboutDialog';
 import TransitPanel from './TransitPanel';
-import { BUS_ICON, PARKING_ICON, trainIcon } from './illustrations';
+import { BUS_ICON, BIKE_ICON, CABLECAR_ICON, PARKING_ICON, parkingIcon, parkingLevel, trainIcon } from './illustrations';
 import { useTrains, type TrainPoint } from '../hooks/useTrains';
-import { useOpenData, type ParkingPoint, type BikePath } from '../hooks/useOpenData';
+import { useOpenData, type OpenPoint, type BikePath } from '../hooks/useOpenData';
 import type { TrafficPoint, BusPoint } from '../types';
 
 type ViewMode  = 'live' | 'history' | 'weekly';
@@ -53,24 +53,45 @@ function SourceBadge({ label, live }: { label: string; live: boolean | null }) {
   return <span className={`badge ${cls}`} title={`${label}: ${text}`}><i />{label} · {text}</span>;
 }
 
+// Dış kaynaklardan gelen metinler ipucu HTML'ine kaçışlanarak yazılır
+const esc = (v: unknown) => String(v).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
+const KIND_TR: Record<string, string> = {
+  'multi-storey': 'Katlı otopark', underground: 'Yeraltı otoparkı', surface: 'Açık otopark',
+  street_side: 'Yol kenarı', lane: 'Yol kenarı', rooftop: 'Çatı otoparkı',
+  bicycle_parking: 'Bisiklet parkı', bicycle_rental: 'Bisiklet kiralama istasyonu',
+};
+
+function openPointTooltip(p: OpenPoint) {
+  const fallback = p.layer === 'parking' ? 'Otopark' : p.layer === 'cablecar' ? 'Teleferik durağı' : 'Bisiklet istasyonu';
+  let html = `<div class="tt-title">${esc(p.name ?? KIND_TR[p.kind ?? ''] ?? fallback)}</div>`;
+  const sub: string[] = [];
+  if (p.name && p.kind && KIND_TR[p.kind]) sub.push(KIND_TR[p.kind]);
+  if (p.district) sub.push(esc(p.district));
+  if (p.fee !== undefined) sub.push(p.fee ? 'Ücretli' : 'Ücretsiz');
+  if (sub.length) html += `<div class="tt-sub">${sub.join(' · ')}</div>`;
+  if (p.free !== undefined && p.capacity) {
+    const occ = Math.round((1 - p.free / p.capacity) * 100);
+    html += `<div class="tt-sub"><b>%${occ} dolu</b> · ${p.free} boş / ${p.capacity}</div>`;
+  } else if (p.capacity) {
+    html += `<div class="tt-sub">Kapasite: ${p.capacity}${p.layer === 'parking' ? ' araç' : ''}</div>`;
+  }
+  return { html };
+}
+
 function tooltipFor(o: unknown, lineColors: Record<string, [number, number, number]>) {
   if (!o || typeof o !== 'object') return null;
   let html = '';
   if ('bearing' in o && 'lineId' in o) {
     const t = o as TrainPoint;
-    return { html: `<div class="tt-title">${t.name}</div><div class="tt-sub">Temsili tren · canlı konum değil</div>` };
+    return { html: `<div class="tt-title">${esc(t.name)}</div><div class="tt-sub">Temsili tren · canlı konum değil</div>` };
   }
   if ('path' in o && !('id' in o)) {
     const b = o as BikePath;
-    return { html: `<div class="tt-title">Bisiklet yolu</div>${b.name ? `<div class="tt-sub">${b.name}</div>` : ''}` };
+    return { html: `<div class="tt-title">Bisiklet yolu</div>${b.name ? `<div class="tt-sub">${esc(b.name)}</div>` : ''}` };
   }
-  if ('capacity' in o || 'free' in o || ('name' in o && !('lines' in o) && !('path' in o))) {
-    const pk = o as ParkingPoint;
-    const parts = [];
-    if (pk.free !== undefined) parts.push(`${pk.free} boş`);
-    if (pk.capacity !== undefined) parts.push(`${pk.capacity} kapasite`);
-    return { html: `<div class="tt-title">${pk.name ?? 'Otopark'}</div>${parts.length ? `<div class="tt-sub">${parts.join(' · ')}</div>` : ''}` };
-  }
+  if ('layer' in o) return openPointTooltip(o as OpenPoint);
   if ('congestionRatio' in o) {
     const t = o as TrafficPoint;
     const pct = Math.round((1 - t.congestionRatio) * 100);
@@ -80,7 +101,7 @@ function tooltipFor(o: unknown, lineColors: Record<string, [number, number, numb
     if (t.closed) html += '<div style="color:#FF4D4D">Yol kapalı</div>';
   } else if ('hatNo' in o) {
     const b = o as BusPoint;
-    html = `<div class="tt-title">EGO hat ${b.hatNo}</div>`;
+    html = `<div class="tt-title">EGO hat ${esc(b.hatNo)}</div>`;
     if (b.hiz) html += `<div class="tt-sub">${b.hiz} km/s</div>`;
   } else if ('lines' in o) {
     const s = o as MetroStation;
@@ -88,9 +109,9 @@ function tooltipFor(o: unknown, lineColors: Record<string, [number, number, numb
       const c = lineColors[l] ?? [150, 150, 150];
       return `<span style="color:rgb(${c.join(',')});font-weight:600">${l}</span>`;
     }).join(' · ');
-    html = `<div class="tt-title">${s.name}</div><div class="tt-sub">${chips}</div>`;
+    html = `<div class="tt-title">${esc(s.name)}</div><div class="tt-sub">${chips}</div>`;
   } else if ('path' in o) {
-    html = `<div class="tt-title">${(o as MetroPath).name}</div>`;
+    html = `<div class="tt-title">${esc((o as MetroPath).name)}</div>`;
   }
   return html ? { html } : null;
 }
@@ -109,6 +130,7 @@ export default function TrafficMap() {
   const [showTransit, setShowTransit]       = useState(!IS_NARROW);
   const [showParking, setShowParking]       = useState(true);
   const [showBike, setShowBike]             = useState(true);
+  const [showBikeStations, setShowBikeStations] = useState(true);
 
   const { trafficData: liveTraffic, busData, lastUpdate, connected } = useWebSocket();
   const { data: historyTraffic, loading: histLoading } = useHistoricalData(
@@ -119,7 +141,7 @@ export default function TrafficMap() {
   const { data: predData, loading: predLoading } = usePrediction(showPrediction);
   const { meta, reachable } = useMeta();
   const trains = useTrains(metroPaths, showMetro);
-  const { parking, bike, sources: openSources } = useOpenData(meta?.openData);
+  const { parking, bikeStations, cablecar, bike, sources: openSources } = useOpenData(meta?.openData);
   const lines = Object.values(Object.fromEntries(metroPaths.map(p => [p.id, { id: p.id, name: p.name, color: p.color }])));
 
   // "x dk önce" göstergesi için saat
@@ -142,6 +164,8 @@ export default function TrafficMap() {
   }, [layerMode]);
 
   const zoom = viewState.zoom;
+  // Uzak yakınlaştırmada yalnızca önemli otoparklar (adı/kapasitesi olan, katlı, yeraltı)
+  const visibleParking = zoom >= 14 ? parking : parking.filter(p => p.major !== false);
   const toggleHeat = layerMode === 'heat';
   const columns = layerMode === 'columns';
 
@@ -163,8 +187,9 @@ export default function TrafficMap() {
       id: 'bike-layer',
       data: bike,
       getPath: d => d.path,
-      getColor: [120, 220, 150, 190],
-      getWidth: 2.5,
+      getColor: [60, 210, 120, 220],
+      getWidth: 3,
+      capRounded: true,
       widthUnits: 'pixels',
       pickable: true,
       visible: showBike && bike.length > 0,
@@ -265,15 +290,36 @@ export default function TrafficMap() {
       fontSettings: { sdf: true },
       visible: showMetro && zoom >= 13.5,
     }),
-    new IconLayer<ParkingPoint>({
+    new IconLayer<OpenPoint>({
       id: 'parking-layer',
-      data: parking,
+      data: visibleParking,
       getPosition: d => d.position,
-      getIcon: () => PARKING_ICON,
+      getIcon: d => parkingIcon(parkingLevel(d.free, d.capacity)),
+      getSize: d => (d.major !== false ? 24 : 18),
+      sizeUnits: 'pixels',
+      pickable: true,
+      visible: showParking && zoom >= 12,
+      updateTriggers: { getIcon: parking },
+    }),
+    new IconLayer<OpenPoint>({
+      id: 'bike-stations-layer',
+      data: bikeStations,
+      getPosition: d => d.position,
+      getIcon: () => BIKE_ICON,
+      getSize: 24,
+      sizeUnits: 'pixels',
+      pickable: true,
+      visible: showBikeStations && zoom >= 11,
+    }),
+    new IconLayer<OpenPoint>({
+      id: 'cablecar-layer',
+      data: cablecar,
+      getPosition: d => d.position,
+      getIcon: () => CABLECAR_ICON,
       getSize: 26,
       sizeUnits: 'pixels',
       pickable: true,
-      visible: showParking && parking.length > 0 && zoom >= 11,
+      visible: showMetro,
     }),
     new IconLayer<TrainPoint>({
       id: 'train-layer',
@@ -406,8 +452,15 @@ export default function TrafficMap() {
                     <img className="ico" src={PARKING_ICON.url} alt="" />Otopark
                   </button>
                 )}
+                {bikeStations.length > 0 && (
+                  <button aria-pressed={showBikeStations} onClick={() => setShowBikeStations(s => !s)}>
+                    <img className="ico" src={BIKE_ICON.url} alt="" />Bisiklet parkı
+                  </button>
+                )}
                 {bike.length > 0 && (
-                  <button aria-pressed={showBike} onClick={() => setShowBike(s => !s)}><i />Bisiklet</button>
+                  <button aria-pressed={showBike} onClick={() => setShowBike(s => !s)}>
+                    <b className="ico-line" />Bisiklet yolu
+                  </button>
                 )}
                 <button aria-pressed={showTransit}    onClick={() => setShowTransit(s => !s)}><i />Ulaşım paneli</button>
                 <button aria-pressed={showSidebar}    onClick={() => setShowSidebar(s => !s)}><i />Bölgeler</button>
@@ -470,8 +523,12 @@ export default function TrafficMap() {
               lines={lines}
               metroSource={meta?.sources.metro}
               parking={parking}
-              bikeCount={bike.length}
+              bikeStations={bikeStations}
+              cablecar={cablecar}
+              bike={bike}
               openSources={openSources}
+              onFocus={(pos) => setViewState(vs => ({ ...vs, longitude: pos[0], latitude: pos[1],
+                zoom: Math.max(vs.zoom, 15), transitionDuration: 800 }))}
               onClose={() => setShowTransit(false)}
             />
           )}

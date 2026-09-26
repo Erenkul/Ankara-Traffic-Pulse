@@ -1,18 +1,31 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../constants';
 
+export type OpenLayerKey = 'parking' | 'bikestations' | 'bike' | 'cablecar';
+
 export interface OpenDataSource {
+  provider: 'file' | 'seffaf' | 'url' | 'ulasav' | 'osm';
   dataset: string;
   page: string;
   license: string;
   fetchedAt: string;
 }
 
-export interface ParkingPoint {
-  position: [number, number];
+interface Props {
   name?: string;
   capacity?: number;
   free?: number;
+  kind?: string;
+  district?: string;
+  fee?: boolean;
+  major?: boolean;
+  length?: number;
+}
+
+/** Otopark, bisiklet istasyonu, teleferik durağı gibi nokta öğeleri. */
+export interface OpenPoint extends Props {
+  layer: OpenLayerKey;
+  position: [number, number];
 }
 
 export interface BikePath {
@@ -20,56 +33,77 @@ export interface BikePath {
   path: [number, number][];
 }
 
+/** @deprecated OpenPoint kullanın */
+export type ParkingPoint = OpenPoint;
+
 type Geometry =
   | { type: 'Point'; coordinates: [number, number] }
   | { type: 'LineString'; coordinates: [number, number][] }
   | { type: 'MultiLineString'; coordinates: [number, number][][] };
 
 interface Layer {
-  features: { geometry: Geometry; properties: { name?: string; capacity?: number; free?: number } }[];
+  features: { geometry: Geometry; properties: Props }[];
   source: OpenDataSource | null;
 }
 
-/** Ankara açık veri katmanları (ULASAV / Şeffaf Ankara). Veri yoksa boş döner. */
-export function useOpenData(available: { parking: number; bike: number } | undefined) {
-  const [parking, setParking] = useState<ParkingPoint[]>([]);
+const POINT_LAYERS: OpenLayerKey[] = ['parking', 'bikestations', 'cablecar'];
+const REFRESH_MS: Record<OpenLayerKey, number> = {
+  parking: 5 * 60_000, bikestations: 30 * 60_000, bike: 60 * 60_000, cablecar: 60 * 60_000,
+};
+
+type Counts = Partial<Record<OpenLayerKey, number>>;
+type Sources = Record<OpenLayerKey, OpenDataSource | null>;
+
+/** Ankara açık veri katmanları (yerel dosya / Şeffaf Ankara / ULASAV / OSM). */
+export function useOpenData(available: Counts | undefined) {
+  const [points, setPoints] = useState<Record<string, OpenPoint[]>>({});
   const [bike, setBike] = useState<BikePath[]>([]);
-  const [sources, setSources] = useState<{ parking: OpenDataSource | null; bike: OpenDataSource | null }>(
-    { parking: null, bike: null });
+  const [sources, setSources] = useState<Sources>(
+    { parking: null, bikestations: null, bike: null, cablecar: null });
 
-  const hasParking = (available?.parking ?? 0) > 0;
-  const hasBike = (available?.bike ?? 0) > 0;
-
-  useEffect(() => {
-    if (!hasParking) return;
-    let cancelled = false;
-    const load = () => fetch(`${API_BASE}/opendata/parking`).then(r => r.json()).then((l: Layer) => {
-      if (cancelled) return;
-      setParking(l.features.filter(f => f.geometry.type === 'Point').map(f => ({
-        position: f.geometry.coordinates as [number, number], ...f.properties,
-      })));
-      setSources(s => ({ ...s, parking: l.source }));
-    }).catch(() => {});
-    load();
-    const t = setInterval(load, 5 * 60_000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, [hasParking]);
+  // Sayı değiştiğinde (ör. sunucu veriyi ilk kez çektiğinde) katmanı yeniden yükle
+  const key = JSON.stringify(available ?? {});
 
   useEffect(() => {
-    if (!hasBike) return;
+    const counts: Counts = JSON.parse(key);
     let cancelled = false;
-    fetch(`${API_BASE}/opendata/bike`).then(r => r.json()).then((l: Layer) => {
-      if (cancelled) return;
-      setBike(l.features.flatMap(f => {
-        if (f.geometry.type === 'LineString') return [{ name: f.properties.name, path: f.geometry.coordinates }];
-        if (f.geometry.type === 'MultiLineString')
-          return f.geometry.coordinates.map(path => ({ name: f.properties.name, path }));
-        return [];
-      }));
-      setSources(s => ({ ...s, bike: l.source }));
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [hasBike]);
+    const timers: ReturnType<typeof setInterval>[] = [];
 
-  return { parking, bike, sources };
+    const load = (layer: OpenLayerKey) =>
+      fetch(`${API_BASE}/opendata/${layer}`).then(r => r.json()).then((l: Layer) => {
+        if (cancelled) return;
+        if (layer === 'bike') {
+          setBike(l.features.flatMap(f => {
+            if (f.geometry.type === 'LineString') return [{ name: f.properties.name, path: f.geometry.coordinates }];
+            if (f.geometry.type === 'MultiLineString')
+              return f.geometry.coordinates.map(path => ({ name: f.properties.name, path }));
+            return [];
+          }));
+        } else {
+          setPoints(p => ({
+            ...p,
+            [layer]: l.features.filter(f => f.geometry.type === 'Point').map(f => ({
+              layer, position: f.geometry.coordinates as [number, number], ...f.properties,
+            })),
+          }));
+        }
+        setSources(s => ({ ...s, [layer]: l.source }));
+      }).catch(() => {});
+
+    for (const layer of [...POINT_LAYERS, 'bike'] as OpenLayerKey[]) {
+      if ((counts[layer] ?? 0) > 0) {
+        load(layer);
+        timers.push(setInterval(() => load(layer), REFRESH_MS[layer]));
+      }
+    }
+    return () => { cancelled = true; timers.forEach(clearInterval); };
+  }, [key]);
+
+  return {
+    parking: points.parking ?? [],
+    bikeStations: points.bikestations ?? [],
+    cablecar: points.cablecar ?? [],
+    bike,
+    sources,
+  };
 }

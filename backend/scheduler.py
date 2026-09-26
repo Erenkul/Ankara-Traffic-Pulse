@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.tomtom import fetch_ankara_traffic
 from services.ego import fetch_ego_buses
 from services.history import save_traffic_snapshot, purge_old_snapshots
 from services.metro import refresh_metro_from_osm
-from services.opendata import refresh_parking, refresh_bike
+from services import opendata
 import os
 from cache import update_traffic, update_buses, set_source
 from services import ego
@@ -20,9 +20,12 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(refresh_buses,   'interval', seconds=BUS_REFRESH_SECONDS,     next_run_time=now)
     scheduler.add_job(refresh_metro_from_osm, 'interval', hours=24, next_run_time=now)
     scheduler.add_job(purge_old, 'interval', hours=24, next_run_time=now)
-    # Açık veri: otopark doluluğu sık değişir, bisiklet yolları nadiren
-    scheduler.add_job(refresh_parking, 'interval', minutes=10, next_run_time=now)
-    scheduler.add_job(refresh_bike, 'interval', hours=24, next_run_time=now)
+    # Açık veri katmanları: her biri kendi yenileme aralığıyla (otopark sık, yollar nadiren)
+    # Genel Overpass sunucuları eşzamanlı sorguyu sınırlar; başlangıçları 20 sn arayla kaydır
+    for i, (key, layer) in enumerate(opendata.LAYERS.items(), start=1):
+        scheduler.add_job(opendata.refresh_layer, 'interval', args=[key],
+                          minutes=layer["refresh_minutes"], id=f"opendata-{key}",
+                          next_run_time=now + timedelta(seconds=20 * i))
     scheduler.start()
     return scheduler
 

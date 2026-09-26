@@ -163,6 +163,39 @@ export function Parking3D({ width = 90 }: { width?: number }) {
   );
 }
 
+/** Bisiklet istasyonu: park yuvası ve yanında izometrik bisiklet. */
+export function Bicycle3D({ width = 120 }: { width?: number }) {
+  const ring = (xc: number, zc: number, r: number): P3[] =>
+    Array.from({ length: 24 }, (_, i) => {
+      const t = (i / 24) * Math.PI * 2;
+      return [xc + r * Math.cos(t), 14, zc + r * Math.sin(t)];
+    });
+  const line = (ps: P3[], color: string, w = 2.4) => (
+    <polyline points={pts(ps)} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />
+  );
+  const frame = '#14a05a';
+  return (
+    <Frame box={[-26, -58, 104, 86]} width={width} label="Bisiklet illüstrasyonu">
+      {/* Zemin plakası ve istasyon direği */}
+      <polygon points={pts([[-6, -4, 0], [72, -4, 0], [72, 24, 0], [-6, 24, 0]])} fill="#2a3240" />
+      <Box x0={60} x1={66} y0={0} y1={6} z0={0} z1={40} color="#9aa6b8" />
+      <Box x0={57} x1={69} y0={-3} y1={9} z0={40} z1={46} color="#14a05a" />
+      <polygon points={pts([[4, 16, 0], [56, 16, 0], [56, 24, 0], [4, 24, 0]])} fill="rgba(0,0,0,.35)" />
+      {/* Tekerlekler */}
+      <polygon points={pts(ring(12, 12, 11))} fill="none" stroke="#c9d1dc" strokeWidth={3} />
+      <polygon points={pts(ring(48, 12, 11))} fill="none" stroke="#c9d1dc" strokeWidth={3} />
+      {/* Kadro */}
+      {line([[12, 14, 12], [27, 14, 12], [23, 14, 30], [12, 14, 12]], frame)}
+      {line([[27, 14, 12], [44, 14, 28], [23, 14, 30]], frame)}
+      {line([[44, 14, 28], [48, 14, 12]], frame)}
+      {line([[42, 14, 34], [44, 14, 28]], '#c9d1dc', 2)}
+      {line([[42, 8, 34], [42, 20, 34]], '#c9d1dc', 2.2)}
+      {line([[19, 14, 33], [27, 14, 33]], '#1a1f27', 3.2)}
+      {line([[22, 14, 30], [23, 14, 33]], '#c9d1dc', 2)}
+    </Frame>
+  );
+}
+
 // ── Harita ikonları (üstten, gölgeli) ──────────────────────────────────────
 const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
@@ -209,14 +242,72 @@ export function trainIcon(rgb: [number, number, number]) {
   return trainIconCache[key];
 }
 
-export const PARKING_ICON = {
-  id: 'parking',
+export type ParkingLevel = 'free' | 'mid' | 'full' | 'unknown';
+
+const PARKING_COLORS: Record<ParkingLevel, string> = {
+  free: '#12a36a',     // < %70 dolu
+  mid: '#d99a00',      // %70–90
+  full: '#d93636',     // > %90
+  unknown: '#1f6fd1',  // doluluk bilgisi yok
+};
+
+/** Boş yer / kapasite oranından doluluk seviyesi. */
+export function parkingLevel(free?: number, capacity?: number): ParkingLevel {
+  if (free === undefined || !capacity) return 'unknown';
+  const occupancy = 1 - free / capacity;
+  return occupancy < 0.7 ? 'free' : occupancy < 0.9 ? 'mid' : 'full';
+}
+
+const parkingIcons = {} as Record<ParkingLevel, { id: string; url: string; width: number; height: number; anchorY: number }>;
+
+/** Doluluk rengine boyanmış "P" otopark ikonu. */
+export function parkingIcon(level: ParkingLevel) {
+  if (!parkingIcons[level]) {
+    parkingIcons[level] = {
+      id: `parking-${level}`,
+      width: 40,
+      height: 40,
+      anchorY: 20,
+      url: svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <rect x="7" y="7" width="30" height="30" rx="8" fill="rgba(0,0,0,.45)"/>
+  <rect x="4" y="4" width="30" height="30" rx="8" fill="${PARKING_COLORS[level]}" stroke="#0b0f16" stroke-width="2"/>
+  <path d="M14 27V11h7a5 5 0 0 1 0 10h-7" fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"/>
+</svg>`),
+    };
+  }
+  return parkingIcons[level];
+}
+
+export const PARKING_ICON = parkingIcon('unknown');
+export const PARKING_LEVEL_COLORS = PARKING_COLORS;
+
+/** Yeşil zeminli bisiklet ikonu (bisiklet parkı / istasyonu). */
+export const BIKE_ICON = {
+  id: 'bike',
+  width: 40,
+  height: 40,
+  anchorY: 20,
+  url: svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <circle cx="22" cy="22" r="16" fill="rgba(0,0,0,.45)"/>
+  <circle cx="19" cy="19" r="16" fill="#14a05a" stroke="#0b0f16" stroke-width="2"/>
+  <g fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11.5" cy="22.5" r="4.5"/><circle cx="26.5" cy="22.5" r="4.5"/>
+    <path d="M11.5 22.5l4.5-8h7l3.5 8M16 14.5l3.5 8h-8M21.5 11.5h3M15 12.5h3"/>
+  </g>
+</svg>`),
+};
+
+/** Mor zeminli teleferik kabini ikonu. */
+export const CABLECAR_ICON = {
+  id: 'cablecar',
   width: 40,
   height: 40,
   anchorY: 20,
   url: svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
   <rect x="7" y="7" width="30" height="30" rx="8" fill="rgba(0,0,0,.45)"/>
-  <rect x="4" y="4" width="30" height="30" rx="8" fill="#1f6fd1" stroke="#0b0f16" stroke-width="2"/>
-  <path d="M14 27V11h7a5 5 0 0 1 0 10h-7" fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"/>
+  <rect x="4" y="4" width="30" height="30" rx="8" fill="#8a4fd8" stroke="#0b0f16" stroke-width="2"/>
+  <path d="M8 11l22-3M19 9.5v5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <rect x="12" y="14.5" width="14" height="13" rx="3" fill="#fff"/>
+  <rect x="14.5" y="17" width="9" height="4.5" rx="1" fill="#8a4fd8"/>
 </svg>`),
 };

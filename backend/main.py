@@ -68,12 +68,13 @@ def _sources() -> dict:
 async def meta():
     """Arayüz için veri kaynakları: traffic tomtom|demo, buses ego|demo, metro osm|static."""
     from database import DB_AVAILABLE
-    return {"sources": _sources(), "db": DB_AVAILABLE, "openData": opendata.availability()}
+    return {"sources": _sources(), "db": DB_AVAILABLE, "openData": opendata.availability(),
+            "openDataProviders": opendata.providers()}
 
 
 @app.get("/api/v1/opendata/{layer}")
 async def open_data_layer(layer: str):
-    """Ankara açık veri katmanı (parking | bike) — ULASAV / Şeffaf Ankara."""
+    """Ankara açık veri katmanı: parking | bikestations | bike | cablecar."""
     if layer not in opendata.LAYERS:
         raise HTTPException(status_code=404, detail="Bilinmeyen katman")
     return opendata.get_layer(layer)

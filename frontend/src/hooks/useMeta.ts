@@ -11,7 +11,8 @@ export interface Meta {
   sources: Sources;
   db: boolean;
   /** Açık veri katmanlarındaki öğe sayısı (0 = veri yok) */
-  openData?: { parking: number; bike: number };
+  openData?: { parking: number; bikestations: number; bike: number; cablecar: number };
+  openDataProviders?: Record<string, string | null>;
 }
 
 /** Veri kaynaklarını (gerçek / demo) dakikada bir sorgular. */
