@@ -11,6 +11,7 @@ def test_health():
     data = r.json()
     assert data["status"] == "ok"
     assert "db" in data  # True (PostgreSQL) veya False (in-memory)
+    assert "trafficPoints" in data["cache"]
 
 
 def test_traffic_live_returns_geojson():

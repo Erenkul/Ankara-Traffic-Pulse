@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { DeckGL } from '@deck.gl/react';
 import { ScatterplotLayer, PathLayer } from '@deck.gl/layers';
@@ -13,10 +13,13 @@ import { usePrediction } from '../hooks/usePrediction';
 import { TimeSlider } from './TimeSlider';
 import DistrictSidebar from './DistrictSidebar';
 import PredictionPanel from './PredictionPanel';
-import type { TrafficPoint, BusPoint } from '../hooks/useTrafficData';
+import type { TrafficPoint, BusPoint } from '../types';
 import type { MetroRoute } from '../hooks/useMetroData';
 
 type ViewMode  = 'live' | 'history' | 'weekly';
+
+// Canlı veri bu süreden eskiyse kullanıcı uyarılır
+const STALE_AFTER_MS = 5 * 60_000;
 type LayerMode = 'scatter' | 'heat';
 
 function getCongestionColor(ratio: number): [number, number, number, number] {
@@ -42,6 +45,15 @@ export default function TrafficMap() {
   const { data: weeklyTraffic, loading: weeklyLoading } = useWeeklyHeatmap(viewMode === 'weekly');
   const { routes: metroRoutes } = useMetroData();
   const { data: predData, loading: predLoading } = usePrediction(showPrediction);
+
+  // "x dk önce" göstergesi için dakikalık saat
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const dataAgeMs = lastUpdate ? now - lastUpdate.getTime() : null;
+  const isStale   = dataAgeMs !== null && dataAgeMs > STALE_AFTER_MS;
 
   const activeTraffic: TrafficPoint[] =
     viewMode === 'live'    ? liveTraffic    :
@@ -121,12 +133,17 @@ export default function TrafficMap() {
         getTooltip={({ object }) => {
           const o = object as TrafficPoint | BusPoint | MetroRoute | null;
           if (!o) return null;
-          if ('congestionRatio' in o)
-            return `Yoğunluk: ${Math.round((1 - (o as TrafficPoint).congestionRatio) * 100)}%`;
+          if ('congestionRatio' in o) {
+            const lines = [`Yoğunluk: ${Math.round((1 - o.congestionRatio) * 100)}%`];
+            if (o.currentSpeed !== undefined && o.freeFlowSpeed !== undefined)
+              lines.push(`Hız: ${o.currentSpeed} / ${o.freeFlowSpeed} km/s`);
+            if (o.closed) lines.push('⚠ Yol kapalı');
+            return lines.join('\n');
+          }
           if ('hatNo' in o)
-            return `Hat: ${(o as BusPoint).hatNo}`;
-          if ('properties' in o && 'name' in (o as MetroRoute).properties)
-            return (o as MetroRoute).properties.name;
+            return o.hiz ? `Hat: ${o.hatNo}\nHız: ${o.hiz} km/s` : `Hat: ${o.hatNo}`;
+          if ('properties' in o)
+            return o.properties.name;
           return null;
         }}
       >
@@ -189,8 +206,14 @@ export default function TrafficMap() {
         </div>
 
         {lastUpdate && (
-          <div style={{ color: '#555', marginTop: 6, fontSize: 11 }}>
+          <div style={{ color: isStale ? '#FF7800' : '#555', marginTop: 6, fontSize: 11 }}>
             Son güncelleme: {lastUpdate.toLocaleTimeString('tr-TR')}
+            {isStale && ` · ${Math.round(dataAgeMs! / 60_000)} dk önce — veri bayat`}
+          </div>
+        )}
+        {viewMode === 'live' && lastUpdate && liveTraffic.length === 0 && (
+          <div style={{ color: '#FF7800', marginTop: 4, fontSize: 11 }}>
+            Trafik noktası yok — TOMTOM_API_KEY tanımlı mı?
           </div>
         )}
       </div>
@@ -207,17 +230,23 @@ export default function TrafficMap() {
         />
       )}
 
-      {/* ── Tahmin Paneli ── */}
-      {showPrediction && (
-        <PredictionPanel
-          data={predData}
-          loading={predLoading}
-          onClose={() => setShowPrediction(false)}
-        />
+      {/* ── Sağ panel sütunu: Tahmin + Bölgeler üst üste binmeden alt alta ── */}
+      {(showPrediction || showSidebar) && (
+        <div style={{
+          position: 'absolute', top: 24, right: 24,
+          display: 'flex', flexDirection: 'column', gap: 12,
+          maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
+        }}>
+          {showPrediction && (
+            <PredictionPanel
+              data={predData}
+              loading={predLoading}
+              onClose={() => setShowPrediction(false)}
+            />
+          )}
+          {showSidebar && <DistrictSidebar />}
+        </div>
       )}
-
-      {/* ── Bölge Sidebar ── */}
-      {showSidebar && <DistrictSidebar />}
     </div>
   );
 }

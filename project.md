@@ -31,6 +31,7 @@ ankara-traffic-pulse/
 ├── docker-compose.yml       ← backend + frontend + postgres
 ├── .gitignore
 ├── backend/
+│   ├── settings.py          ← .env yükleme, ANKARA_TZ, yenileme aralıkları
 │   ├── main.py              ← FastAPI, CORS, lifespan, tüm endpoint'ler
 │   ├── scheduler.py         ← APScheduler + DB kayıt + WS broadcast
 │   ├── cache.py             ← In-memory anlık veri deposu
@@ -40,14 +41,18 @@ ankara-traffic-pulse/
 │   ├── ws_manager.py        ← WebSocket connection manager
 │   ├── models.py            ← Pydantic response modelleri
 │   ├── Procfile             ← Railway deployment
+│   ├── Dockerfile
 │   ├── services/
 │   │   ├── tomtom.py        ← TomTom API (4'erli grup rotasyonu)
 │   │   ├── ego.py           ← EGO otobüs (mock fallback)
-│   │   └── history.py       ← DB kayıt + geçmiş sorgu + bölge stats
+│   │   ├── history.py       ← DB kayıt + geçmiş sorgu + bölge stats
+│   │   ├── metro.py         ← Statik metro/Ankaray GeoJSON
+│   │   └── predict.py       ← Ridge regresyon tahmini + heuristic
 │   ├── tests/
 │   │   ├── test_tomtom.py   ← 4 unit test
 │   │   ├── test_ego.py      ← 3 unit test
-│   │   └── test_api.py      ← 5 endpoint testi
+│   │   ├── test_api.py      ← 5 endpoint testi
+│   │   └── test_core.py     ← cache, bölge, tahmin, WS testleri
 │   ├── .env.example
 │   └── requirements.txt
 └── frontend/
@@ -61,15 +66,18 @@ ankara-traffic-pulse/
         ├── App.tsx
         ├── index.css
         ├── constants.ts     ← API_BASE, WS_URL, ANKARA_CENTER, CARTO_STYLE
+        ├── types.ts         ← TrafficPoint, BusPoint + GeoJSON dönüştürücüler
         ├── hooks/
-        │   ├── useTrafficData.ts    ← REST polling hook (Faz 1)
-        │   ├── useWebSocket.ts      ← WS hook + REST fallback (Faz 2)
-        │   └── useHistoricalData.ts ← Saate göre geçmiş veri (Faz 2)
+        │   ├── useWebSocket.ts      ← WS + yeniden bağlanma + REST fallback
+        │   ├── useHistoricalData.ts ← Saate göre geçmiş veri
+        │   ├── useWeeklyHeatmap.ts  ← Haftalık ortalama
+        │   ├── useMetroData.ts      ← Metro hatları
+        │   └── usePrediction.ts     ← Tahmin (5 dk'da bir)
         └── components/
             ├── TrafficMap.tsx       ← Ana harita, tüm kontroller
             ├── DistrictSidebar.tsx  ← Bölge yoğunluk paneli (Faz 2)
             ├── TimeSlider.tsx       ← Saat seçici (Faz 2)
-            └── BusLayer.tsx         ← Otobüs layer factory
+            └── PredictionPanel.tsx  ← Tahmin paneli (Faz 3)
 ```
 
 ## API Endpoint'leri

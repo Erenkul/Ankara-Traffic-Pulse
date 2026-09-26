@@ -1,10 +1,11 @@
+import settings  # noqa: F401 — .env diğer importlardan önce yüklenmeli
+
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 from scheduler import start_scheduler
-from cache import get_traffic_data, get_bus_data
+from cache import get_traffic_data, get_bus_data, cache_status
 from database import init_db
 from ws_manager import manager
 from districts import district_stats_from_features
@@ -13,21 +14,20 @@ from services.metro import get_metro_routes, get_metro_stations
 from services.predict import get_traffic_prediction
 import os
 
-load_dotenv()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    start_scheduler()
+    scheduler = start_scheduler()
     yield
+    scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="Ankara Traffic Pulse API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:5173")],
+    allow_origins=settings.CORS_ORIGINS,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -48,14 +48,20 @@ async def buses_live():
 @app.get("/api/v1/health")
 async def health():
     from database import DB_AVAILABLE
-    return {"status": "ok", "db": DB_AVAILABLE}
+    return {
+        "status": "ok",
+        "db": DB_AVAILABLE,
+        "wsClients": len(manager.active),
+        "tomtomKey": bool(os.getenv("TOMTOM_API_KEY")),
+        "cache": cache_status(),
+    }
 
 
 # ── Faz 2 endpoint'leri ─────────────────────────────────────────────────────
 
 @app.get("/api/v1/traffic/history")
 async def traffic_history(hour: int = Query(default=8, ge=0, le=23)):
-    """Son 7 günde verilen saate ait trafik anlık görüntüleri (GeoJSON)."""
+    """Son 7 günde verilen saate (Ankara yerel saati) ait trafik anlık görüntüleri (GeoJSON)."""
     features = await get_traffic_history(hour)
     return {"type": "FeatureCollection", "features": features}
 
@@ -109,15 +115,19 @@ async def traffic_predict(hours: int = Query(default=4, ge=1, le=12)):
 @app.websocket("/ws/traffic")
 async def ws_traffic(websocket: WebSocket):
     await manager.connect(websocket)
-    # İlk bağlantıda anlık veriyi gönder
-    await websocket.send_json({
-        "type": "snapshot",
-        "traffic": get_traffic_data(),
-        "buses": get_bus_data(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
     try:
+        # İlk bağlantıda anlık veriyi gönder
+        await websocket.send_json({
+            "type": "snapshot",
+            "traffic": get_traffic_data(),
+            "buses": get_bus_data(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         while True:
-            await websocket.receive_text()  # ping/pong için açık tut
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)

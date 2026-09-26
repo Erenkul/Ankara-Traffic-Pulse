@@ -32,15 +32,12 @@ export default function DistrictSidebar() {
 
   return (
     <div style={{
-      position: 'absolute', top: 24, right: 24,
       background: 'rgba(13,17,23,0.90)',
       color: '#fff', padding: '14px 16px',
       borderRadius: 10, fontSize: 13,
       border: '1px solid #1E6FE8',
       backdropFilter: 'blur(6px)',
-      minWidth: 210,
-      maxHeight: 'calc(100vh - 48px)',
-      overflowY: 'auto',
+      minWidth: 230,
     }}>
       <div style={{ color: '#00C2FF', fontWeight: 700, marginBottom: 12, letterSpacing: 1 }}>
         BÖLGE YOĞUNLUĞU

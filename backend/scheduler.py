@@ -3,16 +3,18 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.tomtom import fetch_ankara_traffic
 from services.ego import fetch_ego_buses
 from services.history import save_traffic_snapshot
-from cache import update_traffic, update_buses, get_traffic_data
+from cache import update_traffic, update_buses
+from settings import TRAFFIC_REFRESH_SECONDS, BUS_REFRESH_SECONDS
 from ws_manager import manager
 
 
-def start_scheduler():
+def start_scheduler() -> AsyncIOScheduler:
     now = datetime.now(timezone.utc)
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(refresh_traffic, 'interval', seconds=60, next_run_time=now)
-    scheduler.add_job(refresh_buses,   'interval', seconds=30, next_run_time=now)
+    scheduler = AsyncIOScheduler(job_defaults={"coalesce": True, "max_instances": 1})
+    scheduler.add_job(refresh_traffic, 'interval', seconds=TRAFFIC_REFRESH_SECONDS, next_run_time=now)
+    scheduler.add_job(refresh_buses,   'interval', seconds=BUS_REFRESH_SECONDS,     next_run_time=now)
     scheduler.start()
+    return scheduler
 
 
 async def refresh_traffic():

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '../constants';
-import type { TrafficPoint } from './useTrafficData';
+import { toTrafficPoints, type TrafficPoint, type TrafficFeatureCollection } from '../types';
 
 export function useWeeklyHeatmap(enabled: boolean) {
   const [data, setData]       = useState<TrafficPoint[]>([]);
@@ -8,18 +8,16 @@ export function useWeeklyHeatmap(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) { setData([]); return; }
+    let cancelled = false;
     setLoading(true);
     fetch(`${API_BASE}/traffic/weekly`)
       .then(r => r.json())
-      .then((fc: { features: { geometry: { coordinates: [number, number] }; properties: { congestionRatio: number } }[] }) => {
-        setData(fc.features.map(f => ({
-          position: f.geometry.coordinates,
-          congestionRatio: f.properties.congestionRatio,
-          closed: false,
-        })));
+      .then((fc: TrafficFeatureCollection) => {
+        if (!cancelled) setData(toTrafficPoints(fc));
       })
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setData([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [enabled]);
 
   return { data, loading };

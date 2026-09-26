@@ -36,21 +36,19 @@ function congestionBar(ratio: number) {
 export default function PredictionPanel({ data, loading, onClose }: Props) {
   return (
     <div style={{
-      position: 'absolute', top: 24, right: 24,
       background: 'rgba(13,17,23,0.93)',
       color: '#fff', padding: '14px 16px',
       borderRadius: 10, fontSize: 12,
       border: '1px solid #1E6FE8',
       backdropFilter: 'blur(6px)',
       minWidth: 230,
-      zIndex: 10,
     }}>
       {/* Başlık */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <span style={{ color: '#00C2FF', fontWeight: 700, letterSpacing: 1, fontSize: 13 }}>
           TAHMİN {loading && <span style={{ fontSize: 10, color: '#555' }}>yükleniyor…</span>}
         </span>
-        <button onClick={onClose} style={{
+        <button onClick={onClose} aria-label="Tahmin panelini kapat" style={{
           background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 14, lineHeight: 1,
         }}>✕</button>
       </div>
@@ -60,7 +58,7 @@ export default function PredictionPanel({ data, loading, onClose }: Props) {
       )}
 
       {data.map(slot => {
-        const hhmm = new Date(slot.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+        const hhmm = new Date(slot.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
         const labelColor = LABEL_COLOR[slot.label] ?? '#888';
         const confIcon   = CONFIDENCE_ICON[slot.confidence] ?? '★☆☆';
         return (

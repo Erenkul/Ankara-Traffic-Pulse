@@ -1,58 +1,80 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { WS_URL, API_BASE, TRAFFIC_REFRESH_MS } from '../constants';
-import type { TrafficPoint, BusPoint } from './useTrafficData';
+import {
+  toTrafficPoints, toBusPoints,
+  type TrafficPoint, type BusPoint, type TrafficFeatureCollection, type RawBus,
+} from '../types';
 
+const HEARTBEAT_MS     = 25_000;
+const RECONNECT_MIN_MS = 2_000;
+const RECONNECT_MAX_MS = 60_000;
+
+/**
+ * WebSocket ile canlı veri. Bağlantı koptuğunda REST polling'e düşer ve
+ * üstel geri çekilmeyle (2s → 60s) yeniden bağlanmayı dener.
+ */
 export function useWebSocket() {
   const [trafficData, setTrafficData] = useState<TrafficPoint[]>([]);
   const [busData, setBusData]         = useState<BusPoint[]>([]);
   const [lastUpdate, setLastUpdate]   = useState<Date | null>(null);
   const [connected, setConnected]     = useState(false);
-  const wsRef   = useRef<WebSocket | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // REST polling fallback (kullanılır WS bağlanamazsa)
-  const pollRest = async () => {
-    try {
-      const [tr, br] = await Promise.all([
-        fetch(`${API_BASE}/traffic/live`),
-        fetch(`${API_BASE}/buses/live`),
-      ]);
-      const traffic = await tr.json();
-      const buses: { boylam: number; enlem: number; hatNo: string }[] = await br.json();
-      applyTraffic(traffic);
-      applyBuses(buses);
-    } catch { /* sessiz hata */ }
-  };
-
-  const applyTraffic = (traffic: { features: { geometry: { coordinates: [number, number] }; properties: { congestionRatio: number; closed: boolean } }[] }) => {
-    setTrafficData(traffic.features.map(f => ({
-      position: f.geometry.coordinates,
-      congestionRatio: f.properties.congestionRatio,
-      closed: f.properties.closed,
-    })));
-    setLastUpdate(new Date());
-  };
-
-  const applyBuses = (buses: { boylam: number; enlem: number; hatNo: string }[]) => {
-    // hatNo'ya göre sırala → deck.gl transitions için stabil dizi indeksi
-    const sorted = [...buses].sort((a, b) => a.hatNo.localeCompare(b.hatNo));
-    setBusData(sorted.map(b => ({
-      position: [b.boylam, b.enlem] as [number, number],
-      hatNo: b.hatNo,
-    })));
-  };
 
   useEffect(() => {
     let dead = false;
+    let ws: WebSocket | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelay = RECONNECT_MIN_MS;
+
+    const applyTraffic = (traffic: TrafficFeatureCollection) => {
+      setTrafficData(toTrafficPoints(traffic));
+      setLastUpdate(new Date());
+    };
+    const applyBuses = (buses: RawBus[]) => setBusData(toBusPoints(buses));
+
+    const pollRest = async () => {
+      try {
+        const [tr, br] = await Promise.all([
+          fetch(`${API_BASE}/traffic/live`),
+          fetch(`${API_BASE}/buses/live`),
+        ]);
+        const traffic: TrafficFeatureCollection = await tr.json();
+        const buses: RawBus[] = await br.json();
+        if (dead) return;
+        applyTraffic(traffic);
+        applyBuses(buses);
+      } catch { /* sessiz hata */ }
+    };
+
+    const startPolling = () => {
+      if (pollTimer) return;
+      pollRest();
+      pollTimer = setInterval(pollRest, TRAFFIC_REFRESH_MS);
+    };
+    const stopPolling = () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+
+    const scheduleReconnect = () => {
+      if (dead || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+    };
 
     const connect = () => {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
+      ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        if (dead) return ws.close();
         setConnected(true);
-        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        reconnectDelay = RECONNECT_MIN_MS;
+        stopPolling();
+        heartbeat = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) ws.send('ping');
+        }, HEARTBEAT_MS);
       };
 
       ws.onmessage = (e) => {
@@ -63,31 +85,24 @@ export function useWebSocket() {
         } catch { /* ignore */ }
       };
 
-      ws.onerror = () => {
-        setConnected(false);
-        // WS başarısız — REST polling'e geç
-        if (!timerRef.current) {
-          pollRest();
-          timerRef.current = setInterval(pollRest, TRAFFIC_REFRESH_MS);
-        }
-      };
-
+      // onerror her zaman onclose ile takip edilir; kurtarma orada yapılır
       ws.onclose = () => {
+        if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+        if (dead) return;
         setConnected(false);
-        if (!dead && !timerRef.current) {
-          pollRest();
-          timerRef.current = setInterval(pollRest, TRAFFIC_REFRESH_MS);
-        }
+        startPolling();
+        scheduleReconnect();
       };
     };
 
     connect();
     return () => {
       dead = true;
-      wsRef.current?.close();
-      if (timerRef.current) clearInterval(timerRef.current);
+      ws?.close();
+      stopPolling();
+      if (heartbeat) clearInterval(heartbeat);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { trafficData, busData, lastUpdate, connected };

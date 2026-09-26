@@ -1,6 +1,9 @@
 import httpx
 import os
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 ANKARA_GROUPS = [
     # Grup 1 — Kızılay / Atatürk Bulvarı / Çankaya merkez
@@ -27,6 +30,9 @@ BASE = "https://api.tomtom.com/traffic/services/4/flowSegmentData"
 async def fetch_ankara_traffic():
     global _group_index
     key = os.getenv("TOMTOM_API_KEY")
+    if not key:
+        logger.warning("TOMTOM_API_KEY tanımlı değil — trafik verisi çekilmiyor.")
+        return {"type": "FeatureCollection", "features": []}
     group = ANKARA_GROUPS[_group_index % len(ANKARA_GROUPS)]
     _group_index += 1
     features = []
@@ -35,6 +41,9 @@ async def fetch_ankara_traffic():
             url = f"{BASE}/absolute/10/json?point={lat},{lng}&unit=KMPH&key={key}"
             try:
                 r = await client.get(url, timeout=10)
+                if r.status_code in (401, 403):
+                    logger.error(f"TomTom yetki/kota hatası ({r.status_code}) — tur atlanıyor.")
+                    break
                 if r.status_code == 200:
                     d = r.json()["flowSegmentData"]
                     ratio = d["currentSpeed"] / max(d["freeFlowSpeed"], 1)
@@ -49,6 +58,6 @@ async def fetch_ankara_traffic():
                         }
                     })
             except Exception as e:
-                print(f"TomTom hata ({lat},{lng}): {e}")
+                logger.warning(f"TomTom hata ({lat},{lng}): {e}")
             await asyncio.sleep(0.5)
     return {"type": "FeatureCollection", "features": features}

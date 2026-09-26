@@ -3,6 +3,11 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from services.tomtom import fetch_ankara_traffic
 
 
+@pytest.fixture(autouse=True)
+def _tomtom_key(monkeypatch):
+    monkeypatch.setenv("TOMTOM_API_KEY", "test-key")
+
+
 def _make_response(data):
     """httpx response mock: json() senkron, get() asenkron."""
     r = MagicMock()
@@ -74,3 +79,23 @@ async def test_group_rotation():
         assert tt._group_index == 1
         await fetch_ankara_traffic()
         assert tt._group_index == 2
+
+
+@pytest.mark.asyncio
+async def test_no_api_key_skips_requests(monkeypatch):
+    monkeypatch.delenv("TOMTOM_API_KEY", raising=False)
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        result = await fetch_ankara_traffic()
+        assert result["features"] == []
+        mock_get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auth_error_stops_group():
+    r = MagicMock()
+    r.status_code = 403
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = r
+        result = await fetch_ankara_traffic()
+        assert result["features"] == []
+        assert mock_get.call_count == 1

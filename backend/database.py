@@ -3,6 +3,8 @@ from sqlalchemy.orm import DeclarativeBase
 import os
 import logging
 
+import settings  # noqa: F401 — .env'yi DATABASE_URL okunmadan önce yükler
+
 logger = logging.getLogger(__name__)
 
 _DATABASE_URL = os.getenv(

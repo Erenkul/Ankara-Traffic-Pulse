@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '../constants';
-import type { TrafficPoint } from './useTrafficData';
+import { toTrafficPoints, type TrafficPoint, type TrafficFeatureCollection } from '../types';
 
 export function useHistoricalData(hour: number | null) {
   const [data, setData]       = useState<TrafficPoint[]>([]);
@@ -12,13 +12,8 @@ export function useHistoricalData(hour: number | null) {
     setLoading(true);
     fetch(`${API_BASE}/traffic/history?hour=${hour}`)
       .then(r => r.json())
-      .then((geojson: { features: { geometry: { coordinates: [number, number] }; properties: { congestionRatio: number; closed: boolean } }[] }) => {
-        if (cancelled) return;
-        setData(geojson.features.map(f => ({
-          position: f.geometry.coordinates,
-          congestionRatio: f.properties.congestionRatio,
-          closed: f.properties.closed,
-        })));
+      .then((geojson: TrafficFeatureCollection) => {
+        if (!cancelled) setData(toTrafficPoints(geojson));
       })
       .catch(() => { if (!cancelled) setData([]); })
       .finally(() => { if (!cancelled) setLoading(false); });

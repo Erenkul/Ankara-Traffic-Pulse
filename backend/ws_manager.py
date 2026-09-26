@@ -1,8 +1,12 @@
-from fastapi import WebSocket
+import asyncio
 import json
 import logging
 
+from fastapi import WebSocket
+
 logger = logging.getLogger(__name__)
+
+_SEND_TIMEOUT = 5  # sn — yavaş istemci yayını bloklamasın
 
 
 class ConnectionManager:
@@ -23,14 +27,14 @@ class ConnectionManager:
         if not self.active:
             return
         msg = json.dumps(data, ensure_ascii=False)
-        dead = []
-        for ws in self.active:
-            try:
-                await ws.send_text(msg)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.active.remove(ws)
+        targets = list(self.active)
+        results = await asyncio.gather(
+            *(asyncio.wait_for(ws.send_text(msg), _SEND_TIMEOUT) for ws in targets),
+            return_exceptions=True,
+        )
+        for ws, res in zip(targets, results):
+            if isinstance(res, BaseException):
+                self.disconnect(ws)
 
 
 manager = ConnectionManager()

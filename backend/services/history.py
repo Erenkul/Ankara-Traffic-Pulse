@@ -45,7 +45,10 @@ async def get_traffic_history(hour: int) -> list[dict]:
                 select(TrafficSnapshot).where(
                     and_(
                         TrafficSnapshot.recorded_at >= since,
-                        extract("hour", TrafficSnapshot.recorded_at) == hour,
+                        # Saat filtresi Ankara yerel saatine göre (DB oturumu UTC olabilir)
+                        extract(
+                            "hour", sqlfunc.timezone("Europe/Istanbul", TrafficSnapshot.recorded_at)
+                        ) == hour,
                     )
                 ).order_by(TrafficSnapshot.recorded_at.desc()).limit(500)
             )
