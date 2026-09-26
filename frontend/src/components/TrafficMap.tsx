@@ -1,52 +1,103 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Map } from 'react-map-gl/maplibre';
 import { DeckGL } from '@deck.gl/react';
-import { ScatterplotLayer, PathLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PathLayer, TextLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ANKARA_CENTER, CARTO_STYLE } from '../constants';
+import { ANKARA_CENTER, CARTO_STYLE, LEVEL_COLORS } from '../constants';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useHistoricalData } from '../hooks/useHistoricalData';
-import { useMetroData } from '../hooks/useMetroData';
+import { useMetroData, type MetroPath, type MetroStation } from '../hooks/useMetroData';
 import { useWeeklyHeatmap } from '../hooks/useWeeklyHeatmap';
 import { usePrediction } from '../hooks/usePrediction';
+import { useMeta, type Meta } from '../hooks/useMeta';
 import { TimeSlider } from './TimeSlider';
 import DistrictSidebar from './DistrictSidebar';
 import PredictionPanel from './PredictionPanel';
+import AboutDialog from './AboutDialog';
 import type { TrafficPoint, BusPoint } from '../types';
-import type { MetroRoute } from '../hooks/useMetroData';
 
 type ViewMode  = 'live' | 'history' | 'weekly';
+type LayerMode = 'scatter' | 'heat';
+type ViewState = typeof ANKARA_CENTER & { pitch?: number; bearing?: number; transitionDuration?: number };
 
 // Canlı veri bu süreden eskiyse kullanıcı uyarılır
 const STALE_AFTER_MS = 5 * 60_000;
-type LayerMode = 'scatter' | 'heat';
+const IS_NARROW = typeof window !== 'undefined' && window.innerWidth < 720;
 
-function getCongestionColor(ratio: number): [number, number, number, number] {
-  if (ratio >= 0.80) return [0, 208, 132, 220];   // yeşil  — serbest
-  if (ratio >= 0.60) return [255, 210, 0,   220];  // sarı   — yavaş
-  if (ratio >= 0.40) return [255, 120, 0,   230];  // turuncu — yoğun
-  return                    [255,  50, 50,  240];  // kırmızı — tıkanık
+type RGBA = [number, number, number, number];
+const hex = (h: string, a: number): RGBA =>
+  [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), a];
+
+function getCongestionColor(ratio: number): RGBA {
+  if (ratio >= 0.80) return hex(LEVEL_COLORS.free, 220);
+  if (ratio >= 0.60) return hex(LEVEL_COLORS.slow, 225);
+  if (ratio >= 0.40) return hex(LEVEL_COLORS.busy, 235);
+  return hex(LEVEL_COLORS.jam, 245);
+}
+
+function levelName(ratio: number) {
+  if (ratio >= 0.80) return 'Serbest';
+  if (ratio >= 0.60) return 'Yavaş';
+  if (ratio >= 0.40) return 'Yoğun';
+  return 'Tıkanık';
+}
+
+function SourceBadge({ label, live }: { label: string; live: boolean | null }) {
+  const cls = live === null ? 'off' : live ? 'live' : 'demo';
+  const text = live === null ? 'yok' : live ? 'canlı' : 'demo';
+  return <span className={`badge ${cls}`} title={`${label}: ${text}`}><i />{label} · {text}</span>;
+}
+
+function tooltipFor(o: unknown, lineColors: Record<string, [number, number, number]>) {
+  if (!o || typeof o !== 'object') return null;
+  let html = '';
+  if ('congestionRatio' in o) {
+    const t = o as TrafficPoint;
+    const pct = Math.round((1 - t.congestionRatio) * 100);
+    html = `<div class="tt-title">${levelName(t.congestionRatio)} · %${pct} yoğunluk</div>`;
+    if (t.currentSpeed !== undefined && t.freeFlowSpeed !== undefined)
+      html += `<div class="tt-sub">${t.currentSpeed} km/s · serbest akışta ${t.freeFlowSpeed} km/s</div>`;
+    if (t.closed) html += '<div style="color:#FF4D4D">Yol kapalı</div>';
+  } else if ('hatNo' in o) {
+    const b = o as BusPoint;
+    html = `<div class="tt-title">EGO hat ${b.hatNo}</div>`;
+    if (b.hiz) html += `<div class="tt-sub">${b.hiz} km/s</div>`;
+  } else if ('lines' in o) {
+    const s = o as MetroStation;
+    const chips = s.lines.map(l => {
+      const c = lineColors[l] ?? [150, 150, 150];
+      return `<span style="color:rgb(${c.join(',')});font-weight:600">${l}</span>`;
+    }).join(' · ');
+    html = `<div class="tt-title">${s.name}</div><div class="tt-sub">${chips}</div>`;
+  } else if ('path' in o) {
+    html = `<div class="tt-title">${(o as MetroPath).name}</div>`;
+  }
+  return html ? { html } : null;
 }
 
 export default function TrafficMap() {
-  const [viewState, setViewState]     = useState(ANKARA_CENTER);
+  const [viewState, setViewState]     = useState<ViewState>(ANKARA_CENTER);
   const [viewMode, setViewMode]       = useState<ViewMode>('live');
   const [layerMode, setLayerMode]     = useState<LayerMode>('scatter');
   const [historyHour, setHistoryHour] = useState<number>(8);
-  const [showSidebar, setShowSidebar]       = useState(true);
+  const [showSidebar, setShowSidebar]       = useState(!IS_NARROW);
   const [showMetro, setShowMetro]           = useState(true);
+  const [showBuses, setShowBuses]           = useState(true);
   const [showPrediction, setShowPrediction] = useState(false);
+  const [showControls, setShowControls]     = useState(!IS_NARROW);
+  const [showAbout, setShowAbout]           = useState(false);
 
   const { trafficData: liveTraffic, busData, lastUpdate, connected } = useWebSocket();
   const { data: historyTraffic, loading: histLoading } = useHistoricalData(
     viewMode === 'history' ? historyHour : null
   );
   const { data: weeklyTraffic, loading: weeklyLoading } = useWeeklyHeatmap(viewMode === 'weekly');
-  const { routes: metroRoutes } = useMetroData();
+  const { paths: metroPaths, stations, lineColors } = useMetroData();
   const { data: predData, loading: predLoading } = usePrediction(showPrediction);
+  const { meta, reachable } = useMeta();
 
-  // "x dk önce" göstergesi için dakikalık saat
+  // "x dk önce" göstergesi için saat
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -60,205 +111,290 @@ export default function TrafficMap() {
     viewMode === 'history' ? historyTraffic :
     weeklyTraffic;
 
+  const resetView = useCallback(() => {
+    setViewState({ ...ANKARA_CENTER, pitch: 0, bearing: 0, transitionDuration: 700 } as ViewState);
+  }, []);
+
+  const zoom = viewState.zoom;
+  const toggleHeat = layerMode === 'heat';
+
   // ── Katmanlar ───────────────────────────────────────────────────────────────
 
-  const scatterLayer = new ScatterplotLayer<TrafficPoint>({
-    id: 'traffic-scatter',
-    data: activeTraffic,
-    getPosition: d => d.position,
-    getRadius: 300,
-    getFillColor: d => getCongestionColor(d.congestionRatio),
-    getLineColor: d => getCongestionColor(d.congestionRatio),
-    opacity: 0.85,
-    stroked: true,
-    lineWidthMinPixels: 2,
-    radiusMinPixels: 8,
-    pickable: true,
-    visible: layerMode === 'scatter',
-  });
+  const layers = [
+    new PathLayer<MetroPath>({
+      id: 'metro-layer',
+      data: metroPaths,
+      getPath: d => d.path,
+      getColor: d => [...d.color, 210] as RGBA,
+      getWidth: 5,
+      widthUnits: 'pixels',
+      capRounded: true,
+      jointRounded: true,
+      pickable: true,
+      visible: showMetro,
+    }),
+    new HeatmapLayer<TrafficPoint>({
+      id: 'traffic-heat',
+      data: activeTraffic,
+      getPosition: d => d.position,
+      getWeight: d => 1 - d.congestionRatio,
+      radiusPixels: 80,
+      intensity: 1.2,
+      threshold: 0.05,
+      colorRange: [
+        [0, 208, 132, 0],
+        [0, 208, 132, 170],
+        [255, 210, 0, 200],
+        [255, 138, 31, 220],
+        [255, 77, 77, 240],
+        [200, 0, 50, 255],
+      ],
+      visible: toggleHeat,
+    }),
+    new ScatterplotLayer<TrafficPoint>({
+      id: 'traffic-halo',
+      data: activeTraffic,
+      getPosition: d => d.position,
+      getRadius: 18,
+      radiusUnits: 'pixels',
+      getFillColor: d => { const c = getCongestionColor(d.congestionRatio); return [c[0], c[1], c[2], 45]; },
+      visible: !toggleHeat,
+    }),
+    new ScatterplotLayer<TrafficPoint>({
+      id: 'traffic-scatter',
+      data: activeTraffic,
+      getPosition: d => d.position,
+      getRadius: 8,
+      radiusUnits: 'pixels',
+      getFillColor: d => getCongestionColor(d.congestionRatio),
+      getLineColor: [11, 15, 22, 255],
+      stroked: true,
+      lineWidthMinPixels: 1.5,
+      pickable: true,
+      visible: !toggleHeat,
+      transitions: { getFillColor: 600 },
+    }),
+    new ScatterplotLayer<MetroStation>({
+      id: 'metro-stations',
+      data: stations,
+      getPosition: d => d.position,
+      getRadius: 4,
+      radiusUnits: 'pixels',
+      getFillColor: [240, 244, 250, 255],
+      getLineColor: d => [...(lineColors[d.lines[0]] ?? [150, 150, 150]), 255] as RGBA,
+      stroked: true,
+      lineWidthMinPixels: 2,
+      pickable: true,
+      visible: showMetro && zoom >= 11.5,
+    }),
+    new TextLayer<MetroStation>({
+      id: 'metro-labels',
+      data: stations,
+      getPosition: d => d.position,
+      getText: d => d.name,
+      getSize: 11,
+      getColor: [200, 210, 225, 230],
+      getPixelOffset: [0, -12],
+      characterSet: 'auto',
+      fontFamily: 'IBM Plex Sans, system-ui, sans-serif',
+      outlineWidth: 3,
+      outlineColor: [11, 15, 22, 255],
+      fontSettings: { sdf: true },
+      visible: showMetro && zoom >= 13.5,
+    }),
+    new ScatterplotLayer<BusPoint>({
+      id: 'bus-layer',
+      data: busData,
+      getPosition: d => d.position,
+      getRadius: 6,
+      radiusUnits: 'pixels',
+      getFillColor: [0, 194, 255, 235],
+      getLineColor: [11, 15, 22, 255],
+      stroked: true,
+      lineWidthMinPixels: 1.5,
+      pickable: true,
+      visible: viewMode === 'live' && showBuses,
+      // Konum değiştiğinde 28 sn boyunca yumuşak geçiş (30 sn yenilemeye denk)
+      transitions: { getPosition: { duration: 28_000, enter: (v: number[]) => v } },
+    }),
+    new TextLayer<BusPoint>({
+      id: 'bus-labels',
+      data: busData,
+      getPosition: d => d.position,
+      getText: d => d.hatNo,
+      getSize: 10,
+      getColor: [0, 194, 255, 255],
+      getPixelOffset: [0, -13],
+      characterSet: 'auto',
+      fontFamily: 'IBM Plex Mono, monospace',
+      outlineWidth: 3,
+      outlineColor: [11, 15, 22, 255],
+      fontSettings: { sdf: true },
+      visible: viewMode === 'live' && showBuses && zoom >= 13,
+      transitions: { getPosition: { duration: 28_000, enter: (v: number[]) => v } },
+    }),
+  ];
 
-  const heatLayer = new HeatmapLayer<TrafficPoint>({
-    id: 'traffic-heat',
-    data: activeTraffic,
-    getPosition: d => d.position,
-    getWeight: d => 1 - d.congestionRatio,
-    radiusPixels: 80,
-    intensity: 1.2,
-    threshold: 0.05,
-    colorRange: [
-      [0, 208, 132, 0],
-      [0, 208, 132, 180],
-      [255, 195, 0, 200],
-      [255, 130, 0, 220],
-      [255, 77, 77, 240],
-      [200, 0, 50, 255],
-    ],
-    visible: layerMode === 'heat',
-  });
-
-  const busLayer = new ScatterplotLayer<BusPoint>({
-    id: 'bus-layer',
-    data: busData,
-    getPosition: d => d.position,
-    getRadius: 80,
-    getFillColor: [0, 194, 255, 230],
-    radiusMinPixels: 6,
-    pickable: true,
-    visible: viewMode === 'live',
-    // Otobüs konumları değiştiğinde 28 sn boyunca yumuşak geçiş (30 sn refresh'e denk)
-    transitions: {
-      getPosition: { duration: 28_000, enter: (v: number[]) => v },
-    },
-  });
-
-  const metroLayer = new PathLayer<MetroRoute>({
-    id: 'metro-layer',
-    data: metroRoutes,
-    getPath: d => d.geometry.coordinates,
-    getColor: d => [...d.properties.color, 220] as [number, number, number, number],
-    getWidth: 4,
-    widthMinPixels: 3,
-    pickable: true,
-    visible: showMetro,
-  });
+  const src = meta?.sources;
+  const trafficLive = !reachable ? null : src ? (src.traffic === 'none' ? null : src.traffic === 'tomtom') : null;
+  const busesLive   = !reachable ? null : src ? (src.buses === 'none' ? null : src.buses === 'ego') : null;
+  const anyDemo = src?.traffic === 'demo' || src?.buses === 'demo';
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <DeckGL
         viewState={viewState}
-        onViewStateChange={({ viewState: vs }) => setViewState(vs as typeof ANKARA_CENTER)}
+        onViewStateChange={({ viewState: vs }) => setViewState(vs as ViewState)}
         controller={true}
-        layers={[heatLayer, scatterLayer, busLayer, metroLayer]}
+        layers={layers}
         style={{ width: '100%', height: '100%' }}
-        getTooltip={({ object }) => {
-          const o = object as TrafficPoint | BusPoint | MetroRoute | null;
-          if (!o) return null;
-          if ('congestionRatio' in o) {
-            const lines = [`Yoğunluk: ${Math.round((1 - o.congestionRatio) * 100)}%`];
-            if (o.currentSpeed !== undefined && o.freeFlowSpeed !== undefined)
-              lines.push(`Hız: ${o.currentSpeed} / ${o.freeFlowSpeed} km/s`);
-            if (o.closed) lines.push('⚠ Yol kapalı');
-            return lines.join('\n');
-          }
-          if ('hatNo' in o)
-            return o.hiz ? `Hat: ${o.hatNo}\nHız: ${o.hiz} km/s` : `Hat: ${o.hatNo}`;
-          if ('properties' in o)
-            return o.properties.name;
-          return null;
-        }}
+        getTooltip={(info: { object?: unknown }) => tooltipFor(info.object, lineColors)}
       >
         <Map mapStyle={CARTO_STYLE} />
       </DeckGL>
 
-      {/* ── Sol Alt Kontrol Paneli ── */}
-      <div style={{
-        position: 'absolute', bottom: 24, left: 24,
-        background: 'rgba(13,17,23,0.90)',
-        color: '#fff', padding: '12px 16px',
-        borderRadius: 10, fontSize: 13,
-        border: '1px solid #1E6FE8',
-        backdropFilter: 'blur(6px)',
-      }}>
-        <div style={{ color: '#00C2FF', fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>
-          ANKARA TRAFFIC PULSE
-          <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 400, color: connected ? '#00D084' : '#FF4D4D' }}>
-            {connected ? '● WS' : '● REST'}
-          </span>
-        </div>
-
-        {/* Katman */}
-        <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
-          <button onClick={() => setLayerMode('scatter')} style={btn(layerMode === 'scatter')}>Nokta</button>
-          <button onClick={() => setLayerMode('heat')}    style={btn(layerMode === 'heat')}>Isı</button>
-        </div>
-
-        {/* Mod */}
-        <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
-          <button onClick={() => setViewMode('live')}    style={btn(viewMode === 'live')}>Canlı</button>
-          <button onClick={() => setViewMode('history')} style={btn(viewMode === 'history')}>Geçmiş</button>
-          <button onClick={() => setViewMode('weekly')}  style={btn(viewMode === 'weekly')}>Haftalık {weeklyLoading ? '…' : ''}</button>
-        </div>
-
-        {/* Metro + Bölge + Tahmin toggle */}
-        <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
-          <button onClick={() => setShowMetro(s => !s)}      style={btn(showMetro)}>Metro</button>
-          <button onClick={() => setShowSidebar(s => !s)}    style={btn(showSidebar)}>Bölgeler</button>
-          <button onClick={() => setShowPrediction(s => !s)} style={btn(showPrediction)}>Tahmin</button>
-        </div>
-
-        {/* Lejant */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 3, flexWrap: 'wrap' }}>
-          <span style={{ color: '#00D084' }}>● Serbest</span>
-          <span style={{ color: '#FFD200' }}>● Yavaş</span>
-          <span style={{ color: '#FF7800' }}>● Yoğun</span>
-          <span style={{ color: '#FF3232' }}>● Tıkanık</span>
-        </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ color: '#00C2FF' }}>● EGO Otobüs</span>
-          {showMetro && (
-            <>
-              <span style={{ color: '#DC3232' }}>— M1</span>
-              <span style={{ color: '#3264DC' }}>— M2</span>
-              <span style={{ color: '#1EB464' }}>— Ankaray</span>
-              <span style={{ color: '#B450DC' }}>— M3</span>
-            </>
+      {/* ── Sol üst: başlık + kontroller ── */}
+      <div className="top-left">
+        <header className="panel brand">
+          <div className="brand-row">
+            <h1>Ankara Traffic Pulse</h1>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="icon-btn" onClick={resetView} aria-label="Görünümü sıfırla" title="Görünümü sıfırla">⌖</button>
+              <button className="icon-btn" onClick={() => setShowAbout(true)} aria-label="Proje hakkında" title="Hakkında">i</button>
+              <button
+                className="icon-btn"
+                onClick={() => setShowControls(s => !s)}
+                aria-expanded={showControls}
+                aria-label={showControls ? 'Kontrolleri gizle' : 'Kontrolleri göster'}
+                title="Kontroller"
+              >{showControls ? '▴' : '▾'}</button>
+            </div>
+          </div>
+          <p>Ankara'nın 8 ana koridorunda anlık trafik, EGO otobüsleri ve raylı sistem.</p>
+          <div className="badges">
+            <span className={`badge ${!reachable ? 'off' : connected ? 'live' : 'demo'}`}>
+              <i />{!reachable ? 'sunucu yok' : connected ? 'canlı bağlantı' : 'yedek bağlantı'}
+            </span>
+            <SourceBadge label="Trafik" live={trafficLive} />
+            <SourceBadge label="Otobüs" live={busesLive} />
+          </div>
+          {anyDemo && (
+            <p className="status-line warn" style={{ display: 'block' }}>
+              Demo modunda örnek veri gösteriliyor.
+            </p>
           )}
-        </div>
+        </header>
 
-        {lastUpdate && (
-          <div style={{ color: isStale ? '#FF7800' : '#555', marginTop: 6, fontSize: 11 }}>
-            Son güncelleme: {lastUpdate.toLocaleTimeString('tr-TR')}
-            {isStale && ` · ${Math.round(dataAgeMs! / 60_000)} dk önce — veri bayat`}
-          </div>
-        )}
-        {viewMode === 'live' && lastUpdate && liveTraffic.length === 0 && (
-          <div style={{ color: '#FF7800', marginTop: 4, fontSize: 11 }}>
-            Trafik noktası yok — TOMTOM_API_KEY tanımlı mı?
-          </div>
+        {showControls && (
+          <section className="panel controls" aria-label="Harita kontrolleri">
+            <div className="control-group">
+              <span className="panel-title">Zaman</span>
+              <div className="segmented" role="group" aria-label="Zaman">
+                <button aria-pressed={viewMode === 'live'}    onClick={() => setViewMode('live')}>Canlı</button>
+                <button aria-pressed={viewMode === 'history'} onClick={() => setViewMode('history')}>Geçmiş</button>
+                <button aria-pressed={viewMode === 'weekly'}  onClick={() => setViewMode('weekly')}>
+                  Haftalık{weeklyLoading ? '…' : ''}
+                </button>
+              </div>
+            </div>
+
+            <div className="control-group">
+              <span className="panel-title">Gösterim</span>
+              <div className="segmented" role="group" aria-label="Gösterim">
+                <button aria-pressed={layerMode === 'scatter'} onClick={() => setLayerMode('scatter')}>Noktalar</button>
+                <button aria-pressed={layerMode === 'heat'}    onClick={() => setLayerMode('heat')}>Isı haritası</button>
+              </div>
+            </div>
+
+            <div className="control-group">
+              <span className="panel-title">Katmanlar</span>
+              <div className="toggles">
+                <button aria-pressed={showBuses}      onClick={() => setShowBuses(s => !s)}><i />Otobüs</button>
+                <button aria-pressed={showMetro}      onClick={() => setShowMetro(s => !s)}><i />Raylı sistem</button>
+                <button aria-pressed={showSidebar}    onClick={() => setShowSidebar(s => !s)}><i />Bölgeler</button>
+                <button aria-pressed={showPrediction} onClick={() => setShowPrediction(s => !s)}><i />Tahmin</button>
+              </div>
+            </div>
+
+            <div className="control-group">
+              <span className="panel-title">Yoğunluk · hız / serbest akış</span>
+              <div className="legend-scale">
+                <span style={{ background: LEVEL_COLORS.free }} />
+                <span style={{ background: LEVEL_COLORS.slow }} />
+                <span style={{ background: LEVEL_COLORS.busy }} />
+                <span style={{ background: LEVEL_COLORS.jam }} />
+              </div>
+              <div className="legend-labels">
+                <span>Serbest</span><span>Yavaş</span><span>Yoğun</span><span>Tıkanık</span>
+              </div>
+              {(showMetro || showBuses) && (
+                <div className="legend-lines">
+                  {showBuses && <span><b className="bus" />EGO</span>}
+                  {showMetro && Object.entries(lineColors).map(([id, c]) => (
+                    <span key={id}><b style={{ background: `rgb(${c.join(',')})` }} />{id === 'A1' ? 'Ankaray' : id}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <StatusLine
+              viewMode={viewMode}
+              lastUpdate={lastUpdate}
+              isStale={isStale}
+              dataAgeMs={dataAgeMs}
+              empty={activeTraffic.length === 0}
+              meta={meta}
+            />
+          </section>
         )}
       </div>
 
-      {/* ── TimeSlider (Geçmiş modda) ── */}
       {viewMode === 'history' && (
         <TimeSlider
           value={historyHour}
-          min={0}
-          max={23}
           loading={histLoading}
+          count={historyTraffic.length}
           onChange={setHistoryHour}
-          label="Saate Göre Geçmiş (Son 7 Gün)"
         />
       )}
 
-      {/* ── Sağ panel sütunu: Tahmin + Bölgeler üst üste binmeden alt alta ── */}
+      {/* ── Sağ panel sütunu ── */}
       {(showPrediction || showSidebar) && (
-        <div style={{
-          position: 'absolute', top: 24, right: 24,
-          display: 'flex', flexDirection: 'column', gap: 12,
-          maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
-        }}>
+        <div className={`right-col${viewMode === 'history' ? ' with-slider' : ''}`}>
           {showPrediction && (
-            <PredictionPanel
-              data={predData}
-              loading={predLoading}
-              onClose={() => setShowPrediction(false)}
-            />
+            <PredictionPanel data={predData} loading={predLoading} onClose={() => setShowPrediction(false)} />
           )}
-          {showSidebar && <DistrictSidebar />}
+          {showSidebar && <DistrictSidebar onClose={() => setShowSidebar(false)} />}
         </div>
       )}
+
+      {showAbout && <AboutDialog meta={meta} onClose={() => setShowAbout(false)} />}
     </div>
   );
 }
 
-function btn(active: boolean): React.CSSProperties {
-  return {
-    padding: '3px 10px',
-    borderRadius: 5,
-    border: `1px solid ${active ? '#1E6FE8' : '#2a3040'}`,
-    background: active ? '#1E6FE8' : 'transparent',
-    color: active ? '#fff' : '#888',
-    cursor: 'pointer',
-    fontSize: 12,
-  };
+function StatusLine({ viewMode, lastUpdate, isStale, dataAgeMs, empty, meta }: {
+  viewMode: ViewMode;
+  lastUpdate: Date | null;
+  isStale: boolean;
+  dataAgeMs: number | null;
+  empty: boolean;
+  meta: Meta | null;
+}) {
+  if (viewMode !== 'live') {
+    if (empty && meta && !meta.db)
+      return <div className="status-line warn">Geçmiş veri için PostgreSQL gerekir.</div>;
+    if (empty) return <div className="status-line">Bu aralıkta ölçüm yok.</div>;
+    return null;
+  }
+  if (!lastUpdate) return <div className="status-line">Bağlanıyor…</div>;
+  return (
+    <>
+      <div className={`status-line${isStale ? ' warn' : ''}`}>
+        Son güncelleme {lastUpdate.toLocaleTimeString('tr-TR')}
+        {isStale && ` · ${Math.round(dataAgeMs! / 60_000)} dk önce`}
+      </div>
+      {empty && <div className="status-line warn">Trafik noktası yok. TOMTOM_API_KEY tanımlı mı?</div>}
+    </>
+  );
 }

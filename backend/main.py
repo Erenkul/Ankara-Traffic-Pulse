@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from scheduler import start_scheduler
-from cache import get_traffic_data, get_bus_data, cache_status
+from cache import get_traffic_data, get_bus_data, cache_status, get_sources
 from database import init_db
 from ws_manager import manager
 from districts import district_stats_from_features
@@ -54,7 +54,19 @@ async def health():
         "wsClients": len(manager.active),
         "tomtomKey": bool(os.getenv("TOMTOM_API_KEY")),
         "cache": cache_status(),
+        "sources": _sources(),
     }
+
+
+def _sources() -> dict:
+    return {**get_sources(), "metro": get_metro_routes().get("source", "static")}
+
+
+@app.get("/api/v1/meta")
+async def meta():
+    """Arayüz için veri kaynakları: traffic tomtom|demo, buses ego|demo, metro osm|static."""
+    from database import DB_AVAILABLE
+    return {"sources": _sources(), "db": DB_AVAILABLE}
 
 
 # ── Faz 2 endpoint'leri ─────────────────────────────────────────────────────
@@ -121,6 +133,7 @@ async def ws_traffic(websocket: WebSocket):
             "type": "snapshot",
             "traffic": get_traffic_data(),
             "buses": get_bus_data(),
+            "sources": _sources(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         while True:

@@ -1,4 +1,5 @@
 import type { PredictionSlot } from '../hooks/usePrediction';
+import { LEVEL_COLORS } from '../constants';
 
 interface Props {
   data: PredictionSlot[];
@@ -7,84 +8,47 @@ interface Props {
 }
 
 const LABEL_COLOR: Record<string, string> = {
-  Tıkanık: '#FF3232',
-  Yoğun:   '#FF7800',
-  Orta:    '#FFD200',
-  Serbest: '#00D084',
+  Tıkanık: LEVEL_COLORS.jam,
+  Yoğun:   LEVEL_COLORS.busy,
+  Orta:    LEVEL_COLORS.slow,
+  Serbest: LEVEL_COLORS.free,
 };
 
-const CONFIDENCE_ICON: Record<string, string> = {
-  yüksek:    '★★★',
-  orta:      '★★☆',
-  heuristic: '★☆☆',
+const CONFIDENCE_TEXT: Record<string, string> = {
+  yüksek:    'ML modeli · 500+ kayıt',
+  orta:      'ML modeli · 100+ kayıt',
+  heuristic: 'Ankara saatlik profili (kural tabanlı)',
 };
-
-function congestionBar(ratio: number) {
-  const pct = Math.round(ratio * 100);
-  const color =
-    ratio >= 0.75 ? '#FF3232' :
-    ratio >= 0.55 ? '#FF7800' :
-    ratio >= 0.35 ? '#FFD200' : '#00D084';
-  return (
-    <div style={{ marginTop: 4, background: '#1a2030', borderRadius: 4, height: 6, overflow: 'hidden' }}>
-      <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4,
-                    transition: 'width 0.6s ease' }} />
-    </div>
-  );
-}
 
 export default function PredictionPanel({ data, loading, onClose }: Props) {
   return (
-    <div style={{
-      background: 'rgba(13,17,23,0.93)',
-      color: '#fff', padding: '14px 16px',
-      borderRadius: 10, fontSize: 12,
-      border: '1px solid #1E6FE8',
-      backdropFilter: 'blur(6px)',
-      minWidth: 230,
-    }}>
-      {/* Başlık */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <span style={{ color: '#00C2FF', fontWeight: 700, letterSpacing: 1, fontSize: 13 }}>
-          TAHMİN {loading && <span style={{ fontSize: 10, color: '#555' }}>yükleniyor…</span>}
-        </span>
-        <button onClick={onClose} aria-label="Tahmin panelini kapat" style={{
-          background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 14, lineHeight: 1,
-        }}>✕</button>
+    <section className="panel card" aria-label="Trafik tahmini">
+      <div className="card-head">
+        <span className="panel-title">Tahmin · sonraki {data.length || 4} saat</span>
+        <button className="icon-btn" onClick={onClose} aria-label="Tahmin panelini kapat">✕</button>
       </div>
 
-      {data.length === 0 && !loading && (
-        <div style={{ color: '#555', fontSize: 11 }}>Veri bekleniyor…</div>
-      )}
+      {loading && data.length === 0 && <div className="card-note">Yükleniyor…</div>}
+      {!loading && data.length === 0 && <div className="card-note">Tahmin alınamadı.</div>}
 
       {data.map(slot => {
-        const hhmm = new Date(slot.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
-        const labelColor = LABEL_COLOR[slot.label] ?? '#888';
-        const confIcon   = CONFIDENCE_ICON[slot.confidence] ?? '★☆☆';
+        const hhmm = new Date(slot.timestamp).toLocaleTimeString('tr-TR', {
+          hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul',
+        });
+        const color = LABEL_COLOR[slot.label] ?? '#888';
+        const pct = Math.round(slot.predictedCongestion * 100);
         return (
-          <div key={slot.deltaHours} style={{
-            marginBottom: 10,
-            paddingBottom: 8,
-            borderBottom: '1px solid #1a2030',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ color: '#aaa', fontWeight: 600 }}>
-                +{slot.deltaHours}s — {hhmm}
-              </span>
-              <span style={{ color: labelColor, fontWeight: 700 }}>{slot.label}</span>
+          <div className="row" key={slot.deltaHours}>
+            <div className="row-top">
+              <span><span className="mono">{hhmm}</span> <span className="muted">+{slot.deltaHours} sa</span></span>
+              <span style={{ color, fontWeight: 600 }}>{slot.label} <span className="val">%{pct}</span></span>
             </div>
-            {congestionBar(slot.predictedCongestion)}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-              <span style={{ color: '#444' }}>{Math.round(slot.predictedCongestion * 100)}% yoğunluk</span>
-              <span style={{ color: '#333', fontSize: 9 }} title={`Güven: ${slot.confidence}`}>{confIcon}</span>
-            </div>
+            <div className="track"><div style={{ width: `${Math.max(pct, 2)}%`, background: color }} /></div>
           </div>
         );
       })}
 
-      <div style={{ color: '#2a3040', fontSize: 10, marginTop: 2 }}>
-        ★★★ ML model · ★★☆ az veri · ★☆☆ kural bazlı
-      </div>
-    </div>
+      {data[0] && <div className="card-note">Kaynak: {CONFIDENCE_TEXT[data[0].confidence] ?? data[0].confidence}</div>}
+    </section>
   );
 }

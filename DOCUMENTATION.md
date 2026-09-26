@@ -20,7 +20,7 @@ Ankara Traffic Pulse, Ankara'nın anlık trafik akışını ve EGO belediye otob
 | Veritabanı | PostgreSQL + SQLAlchemy 2.0 async (opsiyonel) |
 | Gerçek Zamanlı | WebSocket push + REST polling fallback |
 | Trafik API | TomTom Traffic Flow API — 2.500 req/gün ücretsiz |
-| Otobüs API | EGO Cepte gayri resmi endpoint (mock fallback) |
+| Otobüs API | EGO Cepte gayri resmi endpoint (demo fallback) |
 | Harita Tile | CARTO Dark Matter — ücretsiz, token yok |
 
 ---
@@ -46,7 +46,7 @@ ankara-traffic-pulse/
 │   ├── Procfile             ← Railway: web: uvicorn main:app ...
 │   ├── services/
 │   │   ├── tomtom.py        ← TomTom API (4'erli grup rotasyonu)
-│   │   ├── ego.py           ← EGO otobüs (mock fallback)
+│   │   ├── ego.py           ← EGO otobüs (demo fallback)
 │   │   └── history.py       ← DB kayıt, geçmiş sorgu, bölge istatistik
 │   ├── tests/
 │   │   ├── test_tomtom.py
@@ -143,7 +143,7 @@ Android emülatör proxy'sini `127.0.0.1:8080` yap → EGO Cepte uygulamasını 
 { "HatNo": "135", "Araclar": [{ "Enlem": 39.93, "Boylam": 32.86 }] }
 ```
 
-> `EGO_API_BASE` boşsa veya API hata verirse `_mock_buses()` devreye girer.
+> `EGO_API_BASE` boşsa veya API hata verirse demo otobüs verisi (`services/demo.py`) devreye girer.
 
 ---
 
@@ -220,7 +220,7 @@ pytest tests/ -v
 | Test Dosyası | Kapsam |
 |---|---|
 | `test_api.py` | health (db field), GeoJSON format, CORS, 404 |
-| `test_ego.py` | mock fallback, API hatası, gerçek veri |
+| `test_ego.py` | demo fallback, API hatası, gerçek veri |
 | `test_tomtom.py` | GeoJSON dönüşü, tıkanık ratio, hata toleransı, grup rotasyonu |
 
 ---
@@ -260,7 +260,7 @@ pytest tests/ -v
 
 ### Faz 1 — Tamamlandı
 - [x] TomTom anlık trafik noktaları (8 lokasyon, grup rotasyonu)
-- [x] EGO otobüs konum katmanı (mock fallback)
+- [x] EGO otobüs konum katmanı (demo fallback)
 - [x] CARTO dark harita, tooltip
 - [x] Otomatik yenileme (60s / 30s)
 - [x] Yoğunluk renk kodlaması (yeşil / sarı / kırmızı)

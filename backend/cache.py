@@ -6,6 +6,16 @@ _traffic_features: dict[tuple, tuple[float, dict]] = {}  # (lng, lat) -> (monoto
 _bus_data = []
 _last_traffic_update: float | None = None
 _last_bus_update: float | None = None
+# Verinin nereden geldiği — arayüz "örnek veri" rozetini buna göre gösterir
+_sources: dict[str, str] = {"traffic": "none", "buses": "none"}
+
+
+def set_source(kind: str, source: str):
+    _sources[kind] = source
+
+
+def get_sources() -> dict[str, str]:
+    return dict(_sources)
 
 
 def _prune(now: float):
@@ -59,5 +69,6 @@ def clear():
     """Testler için."""
     global _bus_data, _last_traffic_update, _last_bus_update
     _traffic_features.clear()
+    _sources.update(traffic="none", buses="none")
     _bus_data = []
     _last_traffic_update = _last_bus_update = None

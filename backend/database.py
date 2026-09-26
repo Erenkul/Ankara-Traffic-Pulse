@@ -7,10 +7,18 @@ import settings  # noqa: F401 — .env'yi DATABASE_URL okunmadan önce yükler
 
 logger = logging.getLogger(__name__)
 
-_DATABASE_URL = os.getenv(
+def _async_url(url: str) -> str:
+    """Railway/Heroku tarzı postgres:// adreslerini asyncpg sürücüsüne çevirir."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
+_DATABASE_URL = _async_url(os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://traffic:traffic_pass@localhost:5432/ankara_traffic"
-)
+))
 
 engine = None
 AsyncSessionLocal = None

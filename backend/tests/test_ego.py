@@ -27,7 +27,9 @@ async def test_returns_mock_on_api_error(monkeypatch):
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.side_effect = Exception("bağlantı hatası")
         result = await fetch_ego_buses()
-        assert result == _mock_buses()
+        assert {b["hatNo"] for b in result} == {b["hatNo"] for b in _mock_buses()}
+        import services.ego as ego
+        assert ego.last_source == "demo"
 
 
 @pytest.mark.asyncio
@@ -38,3 +40,5 @@ async def test_returns_real_data_when_api_ok(monkeypatch):
         mock_get.return_value = _make_response(fake_buses)
         result = await fetch_ego_buses()
         assert result == fake_buses
+        import services.ego as ego
+        assert ego.last_source == "ego"

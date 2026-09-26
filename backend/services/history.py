@@ -1,6 +1,6 @@
 """Geçmiş trafik verilerini PostgreSQL'e kaydeder ve sorgular."""
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, extract, and_
+from sqlalchemy import select, extract, and_, delete
 from sqlalchemy import func as sqlfunc
 import logging
 from cache import get_traffic_data
@@ -32,6 +32,26 @@ async def save_traffic_snapshot(features: list[dict]):
             await session.commit()
     except Exception as e:
         logger.error(f"Snapshot kaydetme hatası: {e}")
+
+
+async def purge_old_snapshots(days: int) -> int:
+    """`days` günden eski kayıtları siler; silinen satır sayısını döner."""
+    if not database.DB_AVAILABLE or database.AsyncSessionLocal is None:
+        return 0
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        async with database.AsyncSessionLocal() as session:
+            result = await session.execute(
+                delete(TrafficSnapshot).where(TrafficSnapshot.recorded_at < cutoff)
+            )
+            await session.commit()
+        deleted = result.rowcount or 0
+        if deleted:
+            logger.info(f"{deleted} eski trafik kaydı silindi (> {days} gün)")
+        return deleted
+    except Exception as e:
+        logger.error(f"Eski kayıt temizleme hatası: {e}")
+        return 0
 
 
 async def get_traffic_history(hour: int) -> list[dict]:

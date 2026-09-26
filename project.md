@@ -44,7 +44,7 @@ ankara-traffic-pulse/
 │   ├── Dockerfile
 │   ├── services/
 │   │   ├── tomtom.py        ← TomTom API (4'erli grup rotasyonu)
-│   │   ├── ego.py           ← EGO otobüs (mock fallback)
+│   │   ├── ego.py           ← EGO otobüs (demo fallback)
 │   │   ├── history.py       ← DB kayıt + geçmiş sorgu + bölge stats
 │   │   ├── metro.py         ← Statik metro/Ankaray GeoJSON
 │   │   └── predict.py       ← Ridge regresyon tahmini + heuristic
@@ -85,7 +85,7 @@ ankara-traffic-pulse/
 | Method | Endpoint | Açıklama | Kaynak |
 |---|---|---|---|
 | GET | `/api/v1/traffic/live` | Anlık trafik (GeoJSON) | TomTom, 60s cache |
-| GET | `/api/v1/buses/live` | EGO otobüs konumları | EGO / mock, 30s cache |
+| GET | `/api/v1/buses/live` | EGO otobüs konumları | EGO / demo, 30s cache |
 | GET | `/api/v1/traffic/history?hour=N` | Son 7 gün, saat N'e ait veriler | PostgreSQL |
 | GET | `/api/v1/traffic/districts` | Bölge yoğunluk istatistikleri | DB / anlık fallback |
 | GET | `/api/v1/health` | Servis + DB durum | — |
@@ -206,7 +206,7 @@ pytest tests/ -v
 
 ### Faz 1 — Tamamlandı
 - [x] TomTom anlık trafik noktaları
-- [x] EGO otobüs konum katmanı (mock fallback)
+- [x] EGO otobüs konum katmanı (demo fallback)
 - [x] CARTO dark harita
 - [x] Otomatik yenileme (60s / 30s)
 - [x] Yoğunluk renk kodlaması + tooltip

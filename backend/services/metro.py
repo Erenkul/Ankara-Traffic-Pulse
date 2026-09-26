@@ -1,117 +1,192 @@
-"""Ankara Metro ve Ankaray hat verileri — statik GeoJSON."""
+"""Ankara raylı sistem hatları (M1–M4, Ankaray).
 
-METRO_ROUTES = {
-    "type": "FeatureCollection",
-    "features": [
-        {
-            "type": "Feature",
-            "properties": {"id": "M1", "name": "M1 Kızılay – Batıkent", "color": [220, 50, 50]},
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [32.8543, 39.9199],  # Kızılay
-                    [32.8516, 39.9257],  # Sıhhiye
-                    [32.8570, 39.9393],  # Ulus
-                    [32.8418, 39.9521],  # Akköprü
-                    [32.8361, 39.9623],  # İvedik
-                    [32.8256, 39.9706],  # Yenimahalle
-                    [32.8100, 39.9815],  # Demetevler
-                    [32.8038, 39.9887],  # Hastane
-                    [32.7973, 39.9932],  # Macunköy
-                    [32.7901, 39.9971],  # Ostim
-                    [32.7820, 40.0021],  # Batıkent
-                ],
-            },
-        },
-        {
-            "type": "Feature",
-            "properties": {"id": "M2", "name": "M2 Kızılay – Keçiören", "color": [50, 100, 220]},
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [32.8543, 39.9199],  # Kızılay
-                    [32.8568, 39.9263],  # Necatibey
-                    [32.8615, 39.9273],  # Demirtepe
-                    [32.8659, 39.9291],  # Tandoğan
-                    [32.8712, 39.9320],  # Maltepe
-                    [32.8726, 39.9340],  # Akay
-                    [32.8737, 39.9378],  # Bahçelievler
-                    [32.8726, 39.9425],  # Beşevler
-                    [32.8707, 39.9475],  # Emek
-                    [32.8695, 39.9546],  # Botanik
-                    [32.8643, 39.9617],  # Gar
-                    [32.8603, 39.9680],  # Mecidiye
-                    [32.8583, 39.9744],  # Kuyubaşı
-                    [32.8569, 39.9808],  # Dutluk
-                    [32.8566, 39.9857],  # Şehitler
-                    [32.8544, 39.9906],  # Keçiören
-                ],
-            },
-        },
-        {
-            "type": "Feature",
-            "properties": {"id": "A1", "name": "Ankaray AŞTİ – Dikimevi", "color": [30, 180, 100]},
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [32.8283, 39.9097],  # AŞTİ
-                    [32.8327, 39.9152],  # Emek
-                    [32.8355, 39.9205],  # Bahçelievler
-                    [32.8391, 39.9201],  # Beştepe
-                    [32.8432, 39.9165],  # Aşıkpaşa
-                    [32.8471, 39.9145],  # Tandoğan
-                    [32.8509, 39.9145],  # Maltepe
-                    [32.8543, 39.9165],  # Akay
-                    [32.8543, 39.9199],  # Kızılay
-                    [32.8577, 39.9170],  # Kolej
-                    [32.8606, 39.9148],  # Kurtuluş
-                    [32.8637, 39.9120],  # Ayrancı
-                    [32.8699, 39.9098],  # Dikimevi
-                ],
-            },
-        },
-        {
-            "type": "Feature",
-            "properties": {"id": "M3", "name": "M3 Macunköy – OSB-Törekent", "color": [180, 80, 220]},
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [32.7973, 39.9932],  # Macunköy
-                    [32.7752, 39.9891],  # Şehir Hastanesi
-                    [32.7635, 39.9847],  # Fatih
-                    [32.7528, 39.9803],  # Hastane
-                    [32.7432, 39.9761],  # Sincan
-                    [32.6960, 39.9720],  # OSB-Törekent
-                ],
-            },
-        },
-    ],
+Öncelik OpenStreetMap: Overpass API'den gerçek hat geometrisi ve istasyonlar
+günde bir çekilir. Ağ erişimi yoksa aşağıdaki statik veri kullanılır; bu veri
+yalnızca kaynaktan doğrulanmış istasyon koordinatlarını içerir, bu yüzden hat
+çizgileri istasyonlar arasında düz çizgidir (yaklaşık).
+"""
+from __future__ import annotations
+
+import logging
+import time
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+_BBOX = "39.80,32.45,40.10,33.00"  # güney, batı, kuzey, doğu
+_CACHE_TTL = 24 * 3600
+
+LINE_INFO: dict[str, dict] = {
+    "M1": {"name": "M1 Kızılay – Batıkent",          "color": [220, 50, 50]},
+    "M2": {"name": "M2 Kızılay – Koru",              "color": [50, 110, 230]},
+    "M3": {"name": "M3 Batıkent – OSB-Törekent",     "color": [150, 90, 220]},
+    "M4": {"name": "M4 Kızılay – Şehitler",          "color": [245, 140, 30]},
+    "A1": {"name": "Ankaray AŞTİ – Dikimevi",        "color": [30, 180, 100]},
 }
 
-METRO_STATIONS = {
-    "type": "FeatureCollection",
-    "features": [
-        # M1
-        {"type": "Feature", "properties": {"line": "M1", "name": "Kızılay"},     "geometry": {"type": "Point", "coordinates": [32.8543, 39.9199]}},
-        {"type": "Feature", "properties": {"line": "M1", "name": "Sıhhiye"},     "geometry": {"type": "Point", "coordinates": [32.8516, 39.9257]}},
-        {"type": "Feature", "properties": {"line": "M1", "name": "Ulus"},        "geometry": {"type": "Point", "coordinates": [32.8570, 39.9393]}},
-        {"type": "Feature", "properties": {"line": "M1", "name": "Yenimahalle"}, "geometry": {"type": "Point", "coordinates": [32.8256, 39.9706]}},
-        {"type": "Feature", "properties": {"line": "M1", "name": "Batıkent"},    "geometry": {"type": "Point", "coordinates": [32.7820, 40.0021]}},
-        # M2
-        {"type": "Feature", "properties": {"line": "M2", "name": "Necatibey"},   "geometry": {"type": "Point", "coordinates": [32.8568, 39.9263]}},
-        {"type": "Feature", "properties": {"line": "M2", "name": "Keçiören"},    "geometry": {"type": "Point", "coordinates": [32.8544, 39.9906]}},
-        # A1
-        {"type": "Feature", "properties": {"line": "A1", "name": "AŞTİ"},        "geometry": {"type": "Point", "coordinates": [32.8283, 39.9097]}},
-        {"type": "Feature", "properties": {"line": "A1", "name": "Dikimevi"},     "geometry": {"type": "Point", "coordinates": [32.8699, 39.9098]}},
-        # M3
-        {"type": "Feature", "properties": {"line": "M3", "name": "Sincan"},       "geometry": {"type": "Point", "coordinates": [32.7432, 39.9761]}},
-    ],
+# ── Statik yedek: doğrulanmış istasyon koordinatları (lng, lat) ─────────────
+_S = {
+    "Kızılay":      (32.8540, 39.9208),
+    "Sıhhiye":      (32.8549, 39.9280),
+    "Ulus":         (32.8507, 39.9398),
+    "AKM":          (32.8440, 39.9443),
+    "Macunköy":     (32.7668, 39.9718),
+    "Batıkent":     (32.7270, 39.9679),
+    "OSB-Törekent": (32.5589, 39.9876),
+    "Koru":         (32.6870, 39.8876),
+    "Adliye":       (32.8505, 39.9306),
+    "Gar":          (32.8422, 39.9341),
+    "Şehitler":     (32.8610, 39.9962),
+    "AŞTİ":         (32.8077, 39.9165),
+    "Dikimevi":     (32.8775, 39.9323),
 }
+
+_STATIC_LINES: dict[str, list[str]] = {
+    "M1": ["Kızılay", "Sıhhiye", "Ulus", "AKM", "Macunköy", "Batıkent"],
+    "M2": ["Kızılay", "Koru"],
+    "M3": ["Batıkent", "OSB-Törekent"],
+    "M4": ["Kızılay", "Adliye", "Gar", "AKM", "Şehitler"],
+    "A1": ["AŞTİ", "Kızılay", "Dikimevi"],
+}
+
+
+def _static_routes() -> dict:
+    return {
+        "type": "FeatureCollection",
+        "source": "static",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": ref, **LINE_INFO[ref]},
+                "geometry": {"type": "LineString", "coordinates": [list(_S[s]) for s in stops]},
+            }
+            for ref, stops in _STATIC_LINES.items()
+        ],
+    }
+
+
+def _static_stations() -> dict:
+    lines_by_station: dict[str, list[str]] = {}
+    for ref, stops in _STATIC_LINES.items():
+        for s in stops:
+            lines_by_station.setdefault(s, []).append(ref)
+    return {
+        "type": "FeatureCollection",
+        "source": "static",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": name, "lines": lines_by_station.get(name, [])},
+                "geometry": {"type": "Point", "coordinates": list(coord)},
+            }
+            for name, coord in _S.items()
+        ],
+    }
+
+
+# ── OpenStreetMap ────────────────────────────────────────────────────────────
+_OVERPASS_QUERY = f"""
+[out:json][timeout:25];
+relation["route"~"^(subway|light_rail)$"]({_BBOX});
+out geom;
+node["railway"="station"]["station"~"^(subway|light_rail)$"]({_BBOX});
+out;
+"""
+
+_cache: dict = {"routes": None, "stations": None, "fetched_at": None}
+
+
+def _normalize_ref(ref: str) -> str | None:
+    ref = ref.strip().upper()
+    if ref in LINE_INFO:
+        return ref
+    if ref in ("A", "ANKARAY") or "ANKARAY" in ref:
+        return "A1"
+    return None
+
+
+def parse_overpass(data: dict) -> tuple[dict, dict] | None:
+    """Overpass yanıtını hat + istasyon GeoJSON'una çevirir. Yetersizse None."""
+    best: dict[str, tuple[int, list]] = {}
+    stations = []
+    for el in data.get("elements", []):
+        if el.get("type") == "relation":
+            tags = el.get("tags", {})
+            ref = _normalize_ref(tags.get("ref", "") or tags.get("name", ""))
+            if not ref:
+                continue
+            parts = [
+                [[p["lon"], p["lat"]] for p in m["geometry"]]
+                for m in el.get("members", [])
+                if m.get("type") == "way" and m.get("role", "") == "" and m.get("geometry")
+            ]
+            size = sum(len(p) for p in parts)
+            # Her yön için ayrı relation var; en ayrıntılısını tut
+            if parts and size > best.get(ref, (0, []))[0]:
+                best[ref] = (size, parts)
+        elif el.get("type") == "node" and el.get("tags", {}).get("name"):
+            stations.append({
+                "type": "Feature",
+                "properties": {"name": el["tags"]["name"], "lines": []},
+                "geometry": {"type": "Point", "coordinates": [el["lon"], el["lat"]]},
+            })
+
+    if len(best) < 3:  # beklenmedik yanıt — statik veriye düş
+        return None
+
+    # İstasyonu ~300 m içinden geçen hatlara bağla
+    for st in stations:
+        lng, lat = st["geometry"]["coordinates"]
+        st["properties"]["lines"] = sorted(
+            ref for ref, (_, parts) in best.items()
+            if any((p[0] - lng) ** 2 + (p[1] - lat) ** 2 < 0.003 ** 2 for part in parts for p in part)
+        )
+    stations = [s for s in stations if s["properties"]["lines"]]
+
+    routes = {
+        "type": "FeatureCollection",
+        "source": "osm",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": ref, **LINE_INFO[ref]},
+                "geometry": {"type": "MultiLineString", "coordinates": parts},
+            }
+            for ref, (_, parts) in sorted(best.items())
+        ],
+    }
+    return routes, {"type": "FeatureCollection", "source": "osm", "features": stations}
+
+
+async def refresh_metro_from_osm() -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=40) as client:
+            r = await client.post(OVERPASS_URL, data={"data": _OVERPASS_QUERY})
+            r.raise_for_status()
+            parsed = parse_overpass(r.json())
+    except Exception as e:
+        logger.warning(f"Metro verisi OSM'den alınamadı, statik veri kullanılıyor: {e}")
+        return False
+    if parsed is None:
+        logger.warning("OSM metro yanıtı yetersiz, statik veri kullanılıyor.")
+        return False
+    _cache["routes"], _cache["stations"] = parsed
+    _cache["fetched_at"] = time.monotonic()
+    logger.info(f"Metro verisi OSM'den alındı: {len(parsed[0]['features'])} hat, "
+                f"{len(parsed[1]['features'])} istasyon")
+    return True
+
+
+def _fresh() -> bool:
+    ts = _cache["fetched_at"]
+    return ts is not None and time.monotonic() - ts < _CACHE_TTL * 2
 
 
 def get_metro_routes():
-    return METRO_ROUTES
+    return _cache["routes"] if _fresh() else _static_routes()
 
 
 def get_metro_stations():
-    return METRO_STATIONS
+    return _cache["stations"] if _fresh() else _static_stations()

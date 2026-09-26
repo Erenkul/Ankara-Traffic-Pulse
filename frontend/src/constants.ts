@@ -34,3 +34,25 @@ export const DISTRICT_LABELS: Record<string, string> = {
   'Esenboğa Yolu':  'Esenboğa Yolu',
   'Konya Yolu':     'Konya Yolu',
 };
+
+// Hız / serbest akış hızı oranına göre yoğunluk seviyeleri (TrafficMap ile aynı eşikler)
+export const LEVEL_COLORS = {
+  free: '#00D084',
+  slow: '#FFD200',
+  busy: '#FF8A1F',
+  jam:  '#FF4D4D',
+} as const;
+
+/** 0–100 yoğunluk yüzdesi (100 = tam tıkanık) için renk. */
+export function congestionPctColor(pct: number): string {
+  if (pct < 20) return LEVEL_COLORS.free;
+  if (pct < 40) return LEVEL_COLORS.slow;
+  if (pct < 60) return LEVEL_COLORS.busy;
+  return LEVEL_COLORS.jam;
+}
+
+export const AUTHOR = {
+  name: 'Alp Eren Kul',
+  site: 'https://alperenkul.com',
+  repo: 'https://github.com/Erenkul/Ankara-Traffic-Pulse',
+};
